@@ -1,6 +1,13 @@
 # AutoScript
 
 - [AutoScript](#autoscript)
+  - [本 Fork 的增强功能](#本-fork-的增强功能)
+    - [多帐号共享采集与轮转参与](#多帐号共享采集与轮转参与)
+    - [轮转配置](#轮转配置)
+    - [固定快照与断点恢复](#固定快照与断点恢复)
+    - [412 软熔断](#412-软熔断)
+    - [专栏与新版 Opus 兼容](#专栏与新版-opus-兼容)
+    - [青龙部署注意事项](#青龙部署注意事项)
   - [操作步骤](#操作步骤)
     - [获取COOKIE](#获取cookie)
       - [扫码登陆](#扫码登陆)
@@ -25,6 +32,92 @@
 [![Build and push Docker images](https://github.com/shanmiteko/LotteryAutoScript/actions/workflows/docker.yml/badge.svg)](https://github.com/shanmiteko/LotteryAutoScript/actions/workflows/docker.yml)
 
 [![Mirror and run GitLab CI](https://github.com/shanmiteko/LotteryAutoScript/actions/workflows/mirror.yml/badge.svg)](https://github.com/shanmiteko/LotteryAutoScript/actions/workflows/mirror.yml)
+
+## 本 Fork 的增强功能
+
+> [!IMPORTANT]
+> 本仓库基于上游 [shanmiteko/LotteryAutoScript](https://github.com/shanmiteko/LotteryAutoScript)，以下内容描述本 Fork 增加的青龙多帐号运行、风控降载和专栏兼容功能。
+
+### 多帐号共享采集与轮转参与
+
+启用轮转模式后，不再让五个帐号分别重复搜索同一批动态：
+
+1. 帐号1读取配置中的专栏、UID、标签等来源，只负责采集并生成本轮固定快照。
+2. 采集阶段不关注、评论、点赞、转发或预约。
+3. 参与阶段帐号1～5都只读取同一份 `lottery_info_1.json`。
+4. 每个帐号每轮最多成功参与 `lottery_batch_size` 条，然后切换到下一个帐号。
+5. 所有仍有待处理候选的帐号完成一轮后，统一休息 `lottery_round_cooldown`。
+6. 不限制总轮数，直到每个帐号都处理完整份快照；已经处理完的帐号不会进入下一轮。
+
+```mermaid
+flowchart TD
+    A[帐号1采集] --> B[原子提交固定快照]
+    B --> C[帐号1处理一批]
+    C --> D[帐号2处理一批]
+    D --> E[帐号3～5依次处理]
+    E --> F{是否仍有帐号未处理完}
+    F -- 是 --> G[全局冷却]
+    G --> C
+    F -- 否 --> H[本次任务结束]
+```
+
+这里的“7条”是每轮批次大小，不是每日总上限。例如固定快照中有 50 条且五个帐号都可正常参与时，每个帐号最多分 8 轮处理，前 7 轮结束后各有一次全局冷却，最后一轮处理余下 1 条。
+
+预约抽奖也会延后到参与阶段并计入批次，不会在筛选阶段一次性预约全部候选。
+
+### 轮转配置
+
+在 `my_config.js` 的 `default_config` 中设置：
+
+| 配置项 | 推荐值 | 说明 |
+| --- | ---: | --- |
+| `enable_lottery_round_robin` | `true` | 启用帐号1采集、所有帐号轮转参与 |
+| `lottery_batch_size` | `7` | 每个帐号每轮最多成功参与的条数，不是总上限 |
+| `lottery_round_cooldown` | `15 * 60 * 1000` | 一整轮结束后的全局休息时间，单位毫秒 |
+| `create_dy` | `false` | 不额外发布随机动态 |
+
+帐号1的独立配置需要开启 `save_lottery_info_to_file`，帐号2～5可保持 `LotteryOrder: [3]`。轮转参与阶段程序也会强制所有帐号只读取帐号1的固定快照，避免重复搜索。
+
+帐号之间原有的 `WAIT` 仍然生效。实际总耗时由候选数量、每条参与间隔、帐号切换间隔、全局冷却次数和网络重试共同决定。不要在上一轮尚未结束时再次启动同一个定时任务。
+
+### 固定快照与断点恢复
+
+- 帐号1先写入 `lottery_info_1.next.json`，完整扫描结束后再原子替换 `lottery_info_1.json`。
+- 新快照只包含本轮采集结果，不会混入上一次扫描的旧候选。
+- 替换前的有效文件保存为 `lottery_info_1.last-good.json`。
+- 如果本轮没有得到任何有效候选，会保留上一份文件，但中止本轮参与，避免误用旧快照。
+- 每个帐号继续使用独立的 `dyids/dyid*.txt` 保存处理进度；任务中断后，下次运行会跳过已经处理的动态。
+- 每次到达批次边界前都会等待当前帐号的 `dyid` 写入完成，再切换帐号。
+
+### 412 软熔断
+
+动态详情接口连续出现 HTTP 412 时，继续逐条请求只会制造更多失败。本 Fork 增加了进程级软熔断：
+
+- 连续 10 次动态详情请求返回 412 后开启熔断。
+- 默认冷却 10 分钟，冷却期间停止 UID、专栏、API 和文本来源的详情请求。
+- 冷却结束后仅放行一次探测请求；成功则恢复，仍为 412 则重新进入冷却。
+- 熔断状态在本次进程内由所有帐号共享，避免换帐号后立即继续冲击同一出口 IP。
+
+这只能降低无效请求和风控压力，不能保证解除帐号或出口 IP 已经受到的限制。
+
+### 专栏与新版 Opus 兼容
+
+针对专栏页面只返回空壳 HTML、旧 `read/cv` 页面跳转或正文迁移到新版 Opus 的情况，本 Fork 增加：
+
+- 正文至少 8 KiB 且包含有效正文结构时才进入动态 ID 提取。
+- 空内容最多尝试 2 次，默认按 `article_content_retry_wait` 等待 5 秒后重试。
+- 旧专栏入口不可用时，先通过 `?from=search` 获取跳转，再使用新版 `/opus/{id}` 入口。
+- 合集中的多个动态 ID 和单篇 Opus 中的单个抽奖动态都可以保留；8 KiB 检查针对页面正文是否完整，不是要求页面必须含有多个动态。
+
+相关设置可在 `my_config.example.js` 中查看：`article_content_max_attempts` 和 `article_content_retry_wait`；8 KiB 是代码中的正文完整性下限。
+
+### 青龙部署注意事项
+
+- 修改源码后，已经运行的 Node.js 进程仍使用内存中缓存的旧模块；新逻辑从下一次任务启动时生效。
+- 建议检索分页间隔保持 2 秒、动态详情间隔保持 3 秒，帐号切换间隔至少 2 分钟；遇到频繁 412 时应继续增大间隔。
+- 与其他使用同一 B 站 Cookie 的任务错开执行，尤其不要让高频互动任务和本脚本同时运行。
+- 不建议额外自动执行随机点赞、随机评论、三连或播放视频来伪装真人；这类无意义互动同样会增加帐号行为风险。
+- 更新前建议备份 `env.js`、`my_config.js`、核心源码、`dyids/` 和 `lottery_info/`。Cookie、私有配置及备份文件不要提交到公开仓库。
 
 已实现功能:
 
