@@ -76,6 +76,21 @@ module.exports = Object.freeze({
         save_lottery_info_to_file: false,
 
         /**
+         * 多帐号轮转参与：帐号1先生成固定快照，随后所有帐号每轮各处理一批
+         */
+        enable_lottery_round_robin: true,
+
+        /**
+         * 每个帐号每轮成功参与的数量（不是每日总上限）
+         */
+        lottery_batch_size: 7,
+
+        /**
+         * 五个帐号完成一轮后的统一休息时间，单位毫秒
+         */
+        lottery_round_cooldown: 15 * 60 * 1000,
+
+        /**
          * API发送数据类型 {LotteryInfo[]}
          * 上传抽奖信息的链接字符串
          */
