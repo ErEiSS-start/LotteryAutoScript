@@ -215,6 +215,17 @@ module.exports = Object.freeze({
         article_content_retry_wait: 5 * 1000,
 
         /**
+         * - 专栏搜索遇到412后的渐进冷却时间，单位毫秒
+         * - 第1次等待2分钟，第2次等待3分钟，第3次及以后等待5分钟
+         * - 每次只重试当前失败的关键词，成功后继续采集
+         */
+        article_search_412_cooldowns: [
+            2 * 60 * 1000,
+            3 * 60 * 1000,
+            5 * 60 * 1000,
+        ],
+
+        /**
          * - 专栏创建时间距离现在的最大天数
          */
         article_create_time: 7,
