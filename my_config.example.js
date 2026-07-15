@@ -188,6 +188,18 @@ module.exports = Object.freeze({
         article_scan_page: 3,
 
         /**
+         * - 专栏正文为空或疑似风控时，最多请求次数
+         * - 首次失败后会尝试新版Opus入口
+         */
+        article_content_max_attempts: 2,
+
+        /**
+         * - 专栏正文重试基础等待时间
+         * - 第n次重试等待该值乘以n，单位毫秒
+         */
+        article_content_retry_wait: 5 * 1000,
+
+        /**
          * - 专栏创建时间距离现在的最大天数
          */
         article_create_time: 7,
