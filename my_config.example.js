@@ -29,6 +29,15 @@ module.exports = Object.freeze({
         ],
 
         /**
+         * 合集UID单页收到 -352 后的渐进重试间隔，可自定义
+         */
+        collection_uid_page_352_cooldowns: [
+            5 * 1000,
+            10 * 1000,
+            20 * 1000
+        ],
+
+        /**
          * 监视的tag
          */
         TAGs: [],
