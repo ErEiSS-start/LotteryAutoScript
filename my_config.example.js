@@ -247,7 +247,19 @@ module.exports = Object.freeze({
          * - 获取动态细节间隔
          * - 单位毫秒
          */
-        get_dynamic_detail_wait: 2000,
+        get_dynamic_detail_wait: 3000,
+
+        /**
+         * - 动态详情连续出现多少次412后开启软熔断
+         * - 熔断只暂停动态详情请求，不影响其他任务
+         */
+        dynamic_detail_412_threshold: 10,
+
+        /**
+         * - 动态详情412软熔断冷却时间
+         * - 冷却后仅放行一次探测请求，单位毫秒
+         */
+        dynamic_detail_412_cooldown: 10 * 60 * 1000,
 
         /**
          * - 过滤间隔(开奖时间/粉丝数)
@@ -532,6 +544,16 @@ module.exports = Object.freeze({
     /**
      * 后续帐号从文件提取抽奖信息转抽
      */
-    config_2: {},
-    config_3: {}
+    config_2: {
+        LotteryOrder: [3],
+    },
+    config_3: {
+        LotteryOrder: [3],
+    },
+    config_4: {
+        LotteryOrder: [3],
+    },
+    config_5: {
+        LotteryOrder: [3],
+    }
 });
