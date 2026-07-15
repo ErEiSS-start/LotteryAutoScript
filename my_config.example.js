@@ -11,6 +11,11 @@ module.exports = Object.freeze({
         UIDs: [],
 
         /**
+         * 发布抽奖合集动态的用户uid，只扫描这里列出的UID
+         */
+        CollectionUIDs: [],
+
+        /**
          * 监视的tag
          */
         TAGs: [],
@@ -64,11 +69,12 @@ module.exports = Object.freeze({
          * * 2 - Articles
          * * 3 - APIs
          * * 4 - TxT
+         * * 5 - CollectionUIDs（扫描合集动态正文）
          * @example
          * [3,2,1,0]
          * [1,2,1,2,1]
          */
-        LotteryOrder: [2, 0, 1, 3],
+        LotteryOrder: [2, 5, 0, 1, 3],
 
         /**
          * 保存抽奖信息至文件
@@ -191,6 +197,19 @@ module.exports = Object.freeze({
          * - 在uid里检索的页数
          */
         uid_scan_page: 3,
+
+        /**
+         * - 每个合集UID固定读取页数
+         */
+        collection_uid_scan_page: 2,
+
+        /**
+         * - 识别合集动态的关键词
+         * - 设为空数组时检查合集UID的所有原创动态
+         */
+        collection_dynamic_keywords: [
+            '抽奖合集', '抽奖汇总', '抽奖整理', '抽奖集合', '抽奖清单', '福利合集'
+        ],
 
         /**
          * - 在tag里检索的页数
@@ -543,6 +562,12 @@ module.exports = Object.freeze({
      * config_[数字] 依次类推
      */
     config_1: {
+        /**
+         * 发布抽奖合集动态的用户uid；帐号1采集顺序启用编号5
+         */
+        CollectionUIDs: [],
+        LotteryOrder: [2, 5, 0, 1, 3],
+
         /**
          * 手动添加抽奖号UID
          * - 抽奖动态下的二级小号
