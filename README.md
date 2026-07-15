@@ -79,7 +79,7 @@ flowchart TD
 
 帐号1的独立配置需要开启 `save_lottery_info_to_file`，帐号2～5可保持 `LotteryOrder: [3]`。轮转参与阶段程序也会强制所有帐号只读取帐号1的固定快照，避免重复搜索。
 
-合集UID来源使用 `LotteryOrder` 编号 `5`。在帐号1配置中填写 `CollectionUIDs: [UID1, UID2]`，并确保采集顺序包含 `5`（推荐 `[2, 5, 0, 1, 3]`）。它默认只识别带“抽奖合集、抽奖汇总、抽奖整理、抽奖集合、抽奖清单、福利合集”等关键词的原创动态；`collection_dynamic_keywords: []` 可检查这些UID的所有原创动态。每个UID读取页数由 `collection_uid_scan_page` 控制，默认固定为2。
+合集UID来源使用 `LotteryOrder` 编号 `5`。相关设置统一放在 `my_config.js` 的 `default_config`、普通 `UIDs` 配置之后：填写 `CollectionUIDs: [UID1, UID2]`，用 `collection_uid_scan_page` 自定义每个UID读取页数（默认2），用 `collection_dynamic_keywords` 自定义合集关键词；关键词设为 `[]` 时检查这些UID的所有原创动态。默认采集顺序为 `[2, 5, 0, 1, 3]`。
 
 帐号之间原有的 `WAIT` 仍然生效。实际总耗时由候选数量、每条参与间隔、帐号切换间隔、全局冷却次数和网络重试共同决定。不要在上一轮尚未结束时再次启动同一个定时任务。
 
