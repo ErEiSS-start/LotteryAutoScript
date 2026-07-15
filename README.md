@@ -48,6 +48,7 @@
 4. 每个帐号每轮最多成功参与 `lottery_batch_size` 条，然后切换到下一个帐号。
 5. 所有仍有待处理候选的帐号完成一轮后，统一休息 `lottery_round_cooldown`。
 6. 不限制总轮数，直到每个帐号都处理完整份快照；已经处理完的帐号不会进入下一轮。
+7. 可选的 `CollectionUIDs` 来源会固定读取指定UP的2页动态，从疑似合集动态的Opus正文链接中批量提取动态ID。
 
 ```mermaid
 flowchart TD
@@ -77,6 +78,8 @@ flowchart TD
 | `create_dy` | `false` | 不额外发布随机动态 |
 
 帐号1的独立配置需要开启 `save_lottery_info_to_file`，帐号2～5可保持 `LotteryOrder: [3]`。轮转参与阶段程序也会强制所有帐号只读取帐号1的固定快照，避免重复搜索。
+
+合集UID来源使用 `LotteryOrder` 编号 `5`。在帐号1配置中填写 `CollectionUIDs: [UID1, UID2]`，并确保采集顺序包含 `5`（推荐 `[2, 5, 0, 1, 3]`）。它默认只识别带“抽奖合集、抽奖汇总、抽奖整理、抽奖集合、抽奖清单、福利合集”等关键词的原创动态；`collection_dynamic_keywords: []` 可检查这些UID的所有原创动态。每个UID读取页数由 `collection_uid_scan_page` 控制，默认固定为2。
 
 帐号之间原有的 `WAIT` 仍然生效。实际总耗时由候选数量、每条参与间隔、帐号切换间隔、全局冷却次数和网络重试共同决定。不要在上一轮尚未结束时再次启动同一个定时任务。
 
