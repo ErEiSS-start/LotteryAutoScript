@@ -43,7 +43,10 @@ module.exports = Object.freeze({
         ],
 
         /**
-         * 监视的tag
+         * 监视的话题。
+         * 推荐显式配置 { id, name }；字符串仅接受新版话题搜索的完全同名结果。
+         * @example
+         * TAGs: [{ id: 1267572, name: '互动抽奖活动' }]
          */
         TAGs: [],
 
@@ -226,7 +229,7 @@ module.exports = Object.freeze({
         uid_scan_page: 3,
 
         /**
-         * - 在tag里检索的页数
+         * - 每个话题最多读取的总页数
          */
         tag_scan_page: 3,
 
