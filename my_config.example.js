@@ -21,6 +21,11 @@ module.exports = Object.freeze({
         collection_uid_scan_page: 2,
 
         /**
+         * 只读取最近多少小时内发布的合集动态，可自定义
+         */
+        collection_dynamic_max_age_hours: 48,
+
+        /**
          * 识别合集动态的关键词，可自定义
          * 设为空数组时检查合集UID的所有原创动态
          */

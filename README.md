@@ -48,7 +48,7 @@
 4. 每个帐号每轮最多成功参与 `lottery_batch_size` 条，然后切换到下一个帐号。
 5. 所有仍有待处理候选的帐号完成一轮后，统一休息 `lottery_round_cooldown`。
 6. 不限制总轮数，直到每个帐号都处理完整份快照；已经处理完的帐号不会进入下一轮。
-7. 可选的 `CollectionUIDs` 来源会固定读取指定UP的2页动态，从疑似合集动态的Opus正文链接中批量提取动态ID。
+7. 可选的 `CollectionUIDs` 来源会固定读取指定UP的2页动态，只展开最近 `collection_dynamic_max_age_hours` 小时内的疑似合集，并从Opus正文链接中批量提取动态ID。
 
 ```mermaid
 flowchart TD
@@ -64,7 +64,9 @@ flowchart TD
 
 这里的“7条”是每轮批次大小，不是每日总上限。例如固定快照中有 50 条且五个帐号都可正常参与时，每个帐号最多分 8 轮处理，前 7 轮结束后各有一次全局冷却，最后一轮处理余下 1 条。
 
-预约抽奖也会延后到参与阶段并计入批次，不会在筛选阶段一次性预约全部候选。
+预约抽奖也会延后到参与阶段并计入批次，不会在筛选阶段一次性预约全部候选。预约接口返回 `75003`（活动已结束）时会直接跳过评论、关注、点赞和转发，并记录该候选避免下轮重复处理。
+
+启用AI评论时，筛选固定快照不会再为全部候选提前调用AI。每个帐号只在候选真正进入当前批次时生成评论；同一动态在本次多帐号任务中会检查已成功发布的评论，重复时携带已有评论重试一次，仍重复或为空则使用未重复的本地评论兜底。
 
 ### 轮转配置
 
@@ -75,11 +77,12 @@ flowchart TD
 | `enable_lottery_round_robin` | `true` | 启用帐号1采集、所有帐号轮转参与 |
 | `lottery_batch_size` | `7` | 每个帐号每轮最多成功参与的条数，不是总上限 |
 | `lottery_round_cooldown` | `15 * 60 * 1000` | 一整轮结束后的全局休息时间，单位毫秒 |
+| `collection_dynamic_max_age_hours` | `48` | 只展开最近多少小时内发布的合集动态 |
 | `create_dy` | `false` | 不额外发布随机动态 |
 
 帐号1的独立配置需要开启 `save_lottery_info_to_file`，帐号2～5可保持 `LotteryOrder: [3]`。轮转参与阶段程序也会强制所有帐号只读取帐号1的固定快照，避免重复搜索。
 
-合集UID来源使用 `LotteryOrder` 编号 `5`。相关设置统一放在 `my_config.js` 的 `default_config`、普通 `UIDs` 配置之后：填写 `CollectionUIDs: [UID1, UID2]`，用 `collection_uid_scan_page` 自定义每个UID读取页数（默认2），用 `collection_dynamic_keywords` 自定义合集关键词；关键词设为 `[]` 时检查这些UID的所有原创动态。单页返回 `-352` 时按 `collection_uid_page_352_cooldowns`（默认5/10/20秒）只重试当前页，最终失败会把本轮标记为采集不完整并拒绝覆盖固定快照。默认采集顺序为 `[2, 5, 0, 1, 3]`。
+合集UID来源使用 `LotteryOrder` 编号 `5`。相关设置统一放在 `my_config.js` 的 `default_config`、普通 `UIDs` 配置之后：填写 `CollectionUIDs: [UID1, UID2]`，用 `collection_uid_scan_page` 自定义每个UID读取页数（默认2），用 `collection_dynamic_max_age_hours` 限制合集发布时间（默认最近48小时），用 `collection_dynamic_keywords` 自定义合集关键词；关键词设为 `[]` 时检查这些UID的所有近期原创动态。发布时间缺失或超出窗口的合集不会读取正文。单页返回 `-352` 时按 `collection_uid_page_352_cooldowns`（默认5/10/20秒）只重试当前页，最终失败会把本轮标记为采集不完整并拒绝覆盖固定快照。默认采集顺序为 `[2, 5, 0, 1, 3]`。
 
 帐号之间原有的 `WAIT` 仍然生效。实际总耗时由候选数量、每条参与间隔、帐号切换间隔、全局冷却次数和网络重试共同决定。不要在上一轮尚未结束时再次启动同一个定时任务。
 
