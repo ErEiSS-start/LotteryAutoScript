@@ -122,7 +122,11 @@ module.exports = Object.freeze({
      * 此处填写Key, 在my_config中的ai_comments_parm中填写API地址等信息
      */
     ai_parm: {
-        //apikey
+        // 旧版单供应商Key，保留兼容；没有ZHIPU_API_KEY时也可作为智谱Key
         AI_API_KEY: '',
+        // Gemini主模型Key
+        GEMINI_API_KEY: '',
+        // 智谱GLM兜底Key
+        ZHIPU_API_KEY: '',
     }
 });

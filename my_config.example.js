@@ -141,17 +141,47 @@ module.exports = Object.freeze({
             '[转关评粉]|参与'
         ],
 
+        /** AI主备调用控制 */
+        ai_request_timeout: 30 * 1000,
+        ai_provider_retry_count: 1,
+        ai_circuit_failure_threshold: 3,
+        ai_circuit_cooldown: 10 * 60 * 1000,
+        ai_judge_concurrency: 2,
+
         /**
-         * AI 判断抽奖
-         * https://learn.microsoft.com/en-us/azure/ai-foundry/openai/reference#chat-completions
+         * AI判断：Gemini主用，GLM免费模型兜底。
+         * 每个非官方动态只判断一次，并跨帐号复用lottery_info目录中的缓存。
          */
         ai_judge_parm: {
-            /**
-             * /chat/completions
-             */
-            url: '',
-            body: {},
-            prompt: ''
+            providers: [
+                {
+                    name: 'gemini-3.5-flash',
+                    url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+                    api_key_env: 'GEMINI_API_KEY',
+                    body: {
+                        model: 'gemini-3.5-flash',
+                        max_tokens: 300,
+                        temperature: 0.1,
+                        extra_body: {
+                            google: {
+                                thinking_config: { thinking_level: 'minimal' }
+                            }
+                        }
+                    }
+                },
+                {
+                    name: 'glm-4.7-flash',
+                    url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+                    api_key_env: 'ZHIPU_API_KEY',
+                    body: {
+                        model: 'glm-4.7-flash',
+                        max_tokens: 300,
+                        temperature: 0.1,
+                        thinking: { type: 'disabled' }
+                    }
+                }
+            ],
+            prompt: '判断B站动态是否为仍可参与的抽奖，并提取参与条件和开奖时间。'
         },
 
         /**
@@ -440,17 +470,37 @@ module.exports = Object.freeze({
             '坚持不懈，迎难而上，开拓创新！', '[OK][OK]', '我来抽个奖', '中中中中中中', '[doge][doge][doge]', '我我我',
         ],
 
-        /**
-         * AI Chat completions参数
-         * https://learn.microsoft.com/en-us/azure/ai-foundry/openai/reference#chat-completions
-         */
+        /** AI评论同样使用Gemini主用、GLM兜底 */
         ai_comments_parm: {
-            /**
-             * /chat/completions
-             */
-            url: '',
-            body: {},
-            prompt: ''
+            providers: [
+                {
+                    name: 'gemini-3.5-flash',
+                    url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+                    api_key_env: 'GEMINI_API_KEY',
+                    body: {
+                        model: 'gemini-3.5-flash',
+                        max_tokens: 100,
+                        temperature: 0.8,
+                        extra_body: {
+                            google: {
+                                thinking_config: { thinking_level: 'minimal' }
+                            }
+                        }
+                    }
+                },
+                {
+                    name: 'glm-4.7-flash',
+                    url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+                    api_key_env: 'ZHIPU_API_KEY',
+                    body: {
+                        model: 'glm-4.7-flash',
+                        max_tokens: 100,
+                        temperature: 0.8,
+                        thinking: { type: 'disabled' }
+                    }
+                }
+            ],
+            prompt: '根据动态要求生成简短、自然且不重复的B站评论。'
         },
 
         /**
@@ -603,24 +653,6 @@ module.exports = Object.freeze({
         ],
 
         APIs: [],
-
-        ai_judge_parm: {
-            url: 'https://api.deepseek.com/chat/completions',
-            body: {
-                'model': 'Qwen/Qwen3-32B',
-                'enable_thinking': true,
-            },
-            prompt: '你是一个B站用户，需要判断动态内容是否是抽奖动态，以及参与条件，以json格式输出，仅需包含key:has_key_words(bool 是否是抽奖动态),needAt(bool 参与抽奖是否需要@自己的好友),needTopic(string 参与抽奖需要带的话题,返回话题需要用#号括起来),drawtime(number 开奖时间的10位数时间戳未获取到返回-1),more(string 总结参与抽奖的条件).回答不要包含markdown标记文本,输出纯json文本'
-        },
-
-        ai_comments_parm: {
-            url: 'https://api.deepseek.com/chat/completions',
-            body: {
-                'model': 'Qwen/Qwen3-32B',
-                'enable_thinking': true,
-            },
-            prompt: '你是一个B站用户，请根据以下内容直接生成一条模拟真实用户的评论，不要使用表情，无需说明信息，且不包含任何敏感词汇。'
-        },
 
         save_lottery_info_to_file: true,
     },
