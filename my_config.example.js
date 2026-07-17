@@ -146,34 +146,20 @@ module.exports = Object.freeze({
             '[转关评粉]|参与'
         ],
 
-        /** AI主备调用控制 */
+        /** AI调用控制 */
         ai_request_timeout: 30 * 1000,
         ai_provider_retry_count: 1,
         ai_circuit_failure_threshold: 3,
         ai_circuit_cooldown: 10 * 60 * 1000,
-        ai_judge_concurrency: 2,
+        // 免费GLM帐号通常只允许较低并发，保持单请求可避免1302。
+        ai_judge_concurrency: 1,
 
         /**
-         * AI判断：Gemini主用，GLM免费模型兜底。
+         * AI判断：仅使用GLM-4.7-Flash。
          * 每个非官方动态只判断一次，并跨帐号复用lottery_info目录中的缓存。
          */
         ai_judge_parm: {
             providers: [
-                {
-                    name: 'gemini-3.5-flash',
-                    url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-                    api_key_env: 'GEMINI_API_KEY',
-                    body: {
-                        model: 'gemini-3.5-flash',
-                        max_tokens: 2048,
-                        temperature: 0.1,
-                        extra_body: {
-                            google: {
-                                thinking_config: { thinking_level: 'minimal' }
-                            }
-                        }
-                    }
-                },
                 {
                     name: 'glm-4.7-flash',
                     url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
@@ -475,24 +461,9 @@ module.exports = Object.freeze({
             '坚持不懈，迎难而上，开拓创新！', '[OK][OK]', '我来抽个奖', '中中中中中中', '[doge][doge][doge]', '我我我',
         ],
 
-        /** AI评论同样使用Gemini主用、GLM兜底 */
+        /** AI评论仅使用GLM-4.7-Flash */
         ai_comments_parm: {
             providers: [
-                {
-                    name: 'gemini-3.5-flash',
-                    url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-                    api_key_env: 'GEMINI_API_KEY',
-                    body: {
-                        model: 'gemini-3.5-flash',
-                        max_tokens: 1024,
-                        temperature: 0.8,
-                        extra_body: {
-                            google: {
-                                thinking_config: { thinking_level: 'minimal' }
-                            }
-                        }
-                    }
-                },
                 {
                     name: 'glm-4.7-flash',
                     url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',

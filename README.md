@@ -3,7 +3,7 @@
 - [AutoScript](#autoscript)
   - [本 Fork 的增强功能](#本-fork-的增强功能)
     - [多帐号共享采集与轮转参与](#多帐号共享采集与轮转参与)
-    - [AI 判断与主备模型](#ai-判断与主备模型)
+    - [AI 判断与 GLM-4.7-Flash](#ai-判断与-glm-47-flash)
     - [轮转配置](#轮转配置)
     - [固定快照与断点恢复](#固定快照与断点恢复)
     - [412 软熔断](#412-软熔断)
@@ -71,9 +71,9 @@ flowchart TD
 
 成功发布的AI评论保存在 `comment_history/successful_comments.json`，默认保留30天，因此任务重启后仍能避免不同帐号在同一动态下使用相似句式。可通过 `ai_comment_retry_count`、`ai_comment_similarity_threshold`、`ai_comment_history_days` 和 `ai_comment_short_max_length` 调整；历史读取或保存失败只记录警告，不会中断参与流程。
 
-### AI 判断与主备模型
+### AI 判断与 GLM-4.7-Flash
 
-本 Fork 支持为抽奖判断和评论配置多个 OpenAI 兼容供应商。推荐顺序为 `gemini-3.5-flash` 主用、`glm-4.7-flash` 兜底：主模型遇到超时、限流、服务错误、空响应或无效 JSON 时自动切换备用模型。连续失败3次的供应商默认熔断10分钟，避免每条候选都等待同一个故障接口；两个模型都失败时，判断退回 `key_words` 规则，评论退回本地自然短评。
+抽奖判断和AI评论统一使用智谱免费模型 `glm-4.7-flash`。模型遇到超时、限流、服务错误、空响应或无效 JSON 时，连续失败会触发默认10分钟熔断；熔断期间判断退回 `key_words` 规则，评论退回本地自然短评。
 
 在 `env.js` 的 `account_parm` 中启用：
 
@@ -85,19 +85,14 @@ ENABLE_AI_COMMENTS: true,
 密钥使用独立环境变量，推荐在青龙环境变量中设置，禁止提交到 Git：
 
 ```text
-GEMINI_API_KEY=Gemini密钥
 ZHIPU_API_KEY=智谱密钥
 ```
 
 旧的 `AI_API_KEY` 仍可作为智谱兜底密钥。供应商 URL、模型和参数见 `my_config.example.js` 的 `ai_judge_parm.providers` 与 `ai_comments_parm.providers`。
 
-也可以使用部署在同一内网的 Sub2API 作为 Gemini 网关。将 Gemini 供应商的 `url` 改为 `http://sub2api:8080/v1/chat/completions`（按实际容器名和端口调整）、`api_key_env` 改为 `SUB2API_API_KEY`，并在青龙环境变量中设置 Sub2API 用户密钥。Sub2API 的 Gemini 上游、分组和用户密钥必须处于可用状态；网关可访问不代表 Google 上游账号已经通过验证。
+帐号1提交固定快照后，会以默认并发1集中判断其中所有非官方候选，避免免费GLM帐号触发并发限制错误1302。结果保存到 `lottery_info/ai_judge_cache.json`，同一动态不会在五个帐号和每轮批次中重复请求：明确非抽奖、已结束或有明确开奖时间的结果缓存30天；无法确定开奖时间的有效抽奖缓存24小时。正文、提示词或模型改变时缓存自动失效。官方抽奖仍使用B站官方开奖接口，不交给AI。
 
-Sub2API 的 Gemini OAuth Chat Completions 兼容层可能不透传供应商专用的最小思考参数，思考 Token 也会占用输出预算。示例因此为抽奖判断预留 `2048`、AI 评论预留 `1024` 个最大输出 Token，避免短 JSON 或短评在生成正文前被截断；这只是上限，并不要求模型输出到该长度。
-
-帐号1提交固定快照后，会以默认并发2集中判断其中所有非官方候选。结果保存到 `lottery_info/ai_judge_cache.json`，同一动态不会在五个帐号和每轮批次中重复请求：明确非抽奖、已结束或有明确开奖时间的结果缓存30天；无法确定开奖时间的有效抽奖缓存24小时。正文、提示词或模型改变时缓存自动失效。官方抽奖仍使用B站官方开奖接口，不交给AI。
-
-判断和评论都强制使用结构化 JSON。Gemini使用最小思考等级，GLM-4.7-Flash显式关闭思考，减少延迟和无用Token。相关控制项为 `ai_request_timeout`、`ai_provider_retry_count`、`ai_circuit_failure_threshold`、`ai_circuit_cooldown` 和 `ai_judge_concurrency`。
+判断和评论都强制使用结构化 JSON。GLM-4.7-Flash显式关闭思考，减少延迟和无用Token。相关控制项为 `ai_request_timeout`、`ai_provider_retry_count`、`ai_circuit_failure_threshold`、`ai_circuit_cooldown` 和 `ai_judge_concurrency`。
 
 ### 轮转配置
 

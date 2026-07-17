@@ -124,11 +124,7 @@ module.exports = Object.freeze({
     ai_parm: {
         // 旧版单供应商Key，保留兼容；没有ZHIPU_API_KEY时也可作为智谱Key
         AI_API_KEY: '',
-        // Gemini主模型Key
-        GEMINI_API_KEY: '',
-        // 可选：通过Sub2API调用Gemini时使用的用户API Key
-        SUB2API_API_KEY: '',
-        // 智谱GLM兜底Key
+        // 智谱GLM-4.7-Flash Key
         ZHIPU_API_KEY: '',
     }
 });
