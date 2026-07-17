@@ -126,6 +126,8 @@ module.exports = Object.freeze({
         AI_API_KEY: '',
         // Gemini主模型Key
         GEMINI_API_KEY: '',
+        // 可选：通过Sub2API调用Gemini时使用的用户API Key
+        SUB2API_API_KEY: '',
         // 智谱GLM兜底Key
         ZHIPU_API_KEY: '',
     }
