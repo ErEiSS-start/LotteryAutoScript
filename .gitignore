@@ -4,6 +4,7 @@ tests/
 dyids/
 lottery_info/
 lottery_dyids/
+comment_history/
 dist/
 .env
 *.log

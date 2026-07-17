@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const {
     Searcher,
     extractCollectionDynamicLinks,
@@ -6,7 +9,18 @@ const {
     modifyTopicDynamicRes,
     normalizeTopicReference,
 } = require('../lib/core/searcher');
-const { Monitor, normalizeAiComment, selectUniqueCommentFallback } = require('../lib/core/monitor');
+const {
+    Monitor,
+    buildAiCommentPrompt,
+    getAiCommentSimilarity,
+    getMaxAiCommentSimilarity,
+    normalizeAiComment,
+    parseAiCommentResponse,
+    selectDiverseCommentFallback,
+    selectUniqueCommentFallback,
+    validateAiComment,
+} = require('../lib/core/monitor');
+const { CommentHistoryStore } = require('../lib/helper/comment_history');
 const { resolveRedirectUrl } = require('../lib/net/http');
 const utils = require('../lib/utils');
 const bili = require('../lib/net/bili');
@@ -140,6 +154,87 @@ assert.strictEqual(
     '来试试手气，祝大家好运！'
 );
 
+const similarEarphoneComments = [
+    '新品耳机亮相不久，评论区热闹非凡，快来抢购同款，加入群聊赢好礼！🎉群号：1064716925🎉',
+    '新耳机上市，快来评论区晒同款，进群还有好礼相送哦！🎉群号：1064716925🎉',
+    '新耳机上市不久，评论区热闹非凡，快来试试同款耳机，进群还有好礼相送哦！🎉（群号：1064716925）',
+    '新耳机亮相不久，评论区已有达人晒同款，快来加入群聊，一起赢取好礼吧！🎉（群号：1064716925）',
+];
+for (let index = 1; index < similarEarphoneComments.length; index++) {
+    assert.ok(
+        getMaxAiCommentSimilarity(
+            similarEarphoneComments[index],
+            similarEarphoneComments.slice(0, index)
+        ) >= 0.57
+    );
+}
+assert.strictEqual(getAiCommentSimilarity('来试试手气', '这个挺喜欢') < 0.57, true);
+assert.deepStrictEqual(
+    parseAiCommentResponse('{"comment":"蹲个结果","has_explicit_requirement":false}'),
+    { comment: '蹲个结果', hasExplicitRequirement: false }
+);
+assert.strictEqual(validateAiComment('蹲个结果').valid, true);
+assert.strictEqual(validateAiComment('进群1064716925领好礼').valid, false);
+assert.strictEqual(validateAiComment('快来参与🎉').valid, false);
+assert.strictEqual(validateAiComment('这是一条超过十五个字但属于明确评论口令的完整回答', {
+    hasExplicitRequirement: true,
+}).valid, true);
+assert.strictEqual(
+    selectDiverseCommentFallback(
+        ['蹲个结果', '这个挺喜欢'],
+        new Map([[normalizeAiComment('蹲个结果'), '蹲个结果']]),
+        0,
+        0.57
+    ),
+    '这个挺喜欢'
+);
+assert.notStrictEqual(
+    buildAiCommentPrompt('', {
+        accountNumber: 1,
+        dyid: '1223378158235942914',
+        attempt: 0,
+        previousComments: [],
+        rejectionReason: '',
+    }),
+    buildAiCommentPrompt('', {
+        accountNumber: 2,
+        dyid: '1223378158235942914',
+        attempt: 0,
+        previousComments: [],
+        rejectionReason: '',
+    })
+);
+
+const historyDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'lottery-comment-history-'));
+const historyPath = path.join(historyDirectory, 'successful_comments.json');
+let historyNow = 2_000_000_000_000;
+const quietLogger = { warn() {} };
+const history = new CommentHistoryStore({
+    filePath: historyPath,
+    retentionDays: 30,
+    now: () => historyNow,
+    logger: quietLogger,
+});
+assert.strictEqual(history.remember('1223378158235942914', '蹲个结果', 1), true);
+const reloadedHistory = new CommentHistoryStore({
+    filePath: historyPath,
+    retentionDays: 30,
+    now: () => historyNow,
+    logger: quietLogger,
+});
+assert.strictEqual(reloadedHistory.getByDyid('1223378158235942914')[0].comment, '蹲个结果');
+historyNow += 31 * 24 * 60 * 60 * 1000;
+assert.strictEqual(reloadedHistory.prune().length, 0);
+fs.writeFileSync(historyPath, '{invalid json', 'utf8');
+const corruptHistory = new CommentHistoryStore({
+    filePath: historyPath,
+    retentionDays: 30,
+    now: () => historyNow,
+    logger: quietLogger,
+});
+assert.deepStrictEqual(corruptHistory.getRecent(), []);
+fs.rmSync(historyDirectory, { recursive: true, force: true });
+
 const filterSource = Monitor.prototype.filterLotteryInfo.toString();
 const goSource = Monitor.prototype.go.toString();
 const uidSource = Searcher.prototype.getLotteryInfoByUID.toString();
@@ -150,5 +245,6 @@ assert.ok(uidSource.indexOf('源动态ID无效') < uidSource.indexOf('getOneDyna
 assert.ok(goSource.includes('getUniqueAiComment'));
 assert.ok(goSource.includes('return 6002'));
 assert.ok(goSource.indexOf('return 6002') < goSource.indexOf('/* 评论 */'));
+assert.ok(goSource.indexOf('} else if (status)') < goSource.indexOf('rememberSuccessfulComment'));
 
 console.log('fork runtime tests passed');

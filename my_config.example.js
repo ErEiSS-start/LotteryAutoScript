@@ -454,6 +454,15 @@ module.exports = Object.freeze({
         },
 
         /**
+         * AI评论差异化：初次生成不合格后最多重试2次；相似度达到0.57时重试。
+         * 成功评论保留30天用于跨任务去重；没有明确口令时生成不超过15字的短评。
+         */
+        ai_comment_retry_count: 2,
+        ai_comment_similarity_threshold: 0.57,
+        ai_comment_history_days: 30,
+        ai_comment_short_max_length: 15,
+
+        /**
          * 是否抄热评
          */
         is_copy_chat: false,
