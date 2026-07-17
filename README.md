@@ -93,6 +93,8 @@ ZHIPU_API_KEY=智谱密钥
 
 也可以使用部署在同一内网的 Sub2API 作为 Gemini 网关。将 Gemini 供应商的 `url` 改为 `http://sub2api:8080/v1/chat/completions`（按实际容器名和端口调整）、`api_key_env` 改为 `SUB2API_API_KEY`，并在青龙环境变量中设置 Sub2API 用户密钥。Sub2API 的 Gemini 上游、分组和用户密钥必须处于可用状态；网关可访问不代表 Google 上游账号已经通过验证。
 
+Sub2API 的 Gemini OAuth Chat Completions 兼容层可能不透传供应商专用的最小思考参数，思考 Token 也会占用输出预算。示例因此为抽奖判断预留 `2048`、AI 评论预留 `1024` 个最大输出 Token，避免短 JSON 或短评在生成正文前被截断；这只是上限，并不要求模型输出到该长度。
+
 帐号1提交固定快照后，会以默认并发2集中判断其中所有非官方候选。结果保存到 `lottery_info/ai_judge_cache.json`，同一动态不会在五个帐号和每轮批次中重复请求：明确非抽奖、已结束或有明确开奖时间的结果缓存30天；无法确定开奖时间的有效抽奖缓存24小时。正文、提示词或模型改变时缓存自动失效。官方抽奖仍使用B站官方开奖接口，不交给AI。
 
 判断和评论都强制使用结构化 JSON。Gemini使用最小思考等级，GLM-4.7-Flash显式关闭思考，减少延迟和无用Token。相关控制项为 `ai_request_timeout`、`ai_provider_retry_count`、`ai_circuit_failure_threshold`、`ai_circuit_cooldown` 和 `ai_judge_concurrency`。

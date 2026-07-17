@@ -160,7 +160,7 @@ module.exports = Object.freeze({
                     api_key_env: 'GEMINI_API_KEY',
                     body: {
                         model: 'gemini-3.5-flash',
-                        max_tokens: 300,
+                        max_tokens: 2048,
                         temperature: 0.1,
                         extra_body: {
                             google: {
@@ -479,7 +479,7 @@ module.exports = Object.freeze({
                     api_key_env: 'GEMINI_API_KEY',
                     body: {
                         model: 'gemini-3.5-flash',
-                        max_tokens: 100,
+                        max_tokens: 1024,
                         temperature: 0.8,
                         extra_body: {
                             google: {
