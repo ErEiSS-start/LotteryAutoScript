@@ -117,6 +117,11 @@ module.exports = Object.freeze({
         enable_lottery_round_robin: true,
 
         /**
+         * 固定快照来源：collect重新采集；reuse复用现有快照；resume从来源级断点续采
+         */
+        lottery_discovery_mode: 'collect',
+
+        /**
          * 每个帐号每轮成功参与的数量（不是每日总上限）
          */
         lottery_batch_size: 7,

@@ -79,82 +79,136 @@ async function runAccount(account, localhost) {
 async function runRoundRobin(accounts, localhost) {
     const config = require('./lib/data/config');
     const global_var = require('./lib/data/global_var');
-    const batchSize = Math.max(1, Number(config.lottery_batch_size) || 7);
-    const roundCooldown = Math.max(0, Number(config.lottery_round_cooldown) || 15 * 60 * 1000);
+    const {
+        discoveryState,
+        normalizeDiscoveryMode,
+    } = require('./lib/helper/discovery_state');
     const firstAccount = accounts[0];
 
     if (!firstAccount) return '未配置可用帐号';
 
+    config.updata(firstAccount.NUMBER);
+    let discoveryMode;
+    try {
+        discoveryMode = normalizeDiscoveryMode(config.lottery_discovery_mode);
+    } catch (error) {
+        return error.message;
+    }
+    if (discoveryMode !== 'reuse' && !config.save_lottery_info_to_file) {
+        return `帐号${firstAccount.NUMBER}未开启save_lottery_info_to_file，无法使用${discoveryMode}模式`;
+    }
+    const batchSize = Math.max(1, Number(config.lottery_batch_size) || 7);
+    const roundCooldown = Math.max(0, Number(config.lottery_round_cooldown) || 15 * 60 * 1000);
+    let snapshotFilename = 'lottery_info_1.json';
+    let errMsg;
+
     loop_wait = 0;
-    process.env.LOTTERY_DISCOVERY_ONLY = '1';
     delete process.env.LOTTERY_SHARED_ONLY;
-    log.info('轮转采集', `帐号${firstAccount.NUMBER}开始生成本轮固定快照`);
-    let errMsg = await runAccount(firstAccount, localhost);
-    delete process.env.LOTTERY_DISCOVERY_ONLY;
-    if (errMsg) return errMsg;
-    if (!global_var.get('accountCookieValid')) {
-        return `帐号${firstAccount.NUMBER} Cookie失效，无法生成固定快照`;
-    }
-    if (!global_var.get('discoveryCommitted')) {
-        return '本轮没有生成有效固定快照，已保留上一份文件且不会开始参与';
-    }
+    delete process.env.LOTTERY_SHARED_SNAPSHOT_FILE;
 
     try {
-        const { preJudgeSharedSnapshot } = require('./lib/helper/ai_judge');
-        await preJudgeSharedSnapshot('lottery_info_1.json');
-    } catch (error) {
-        log.error('AI预判', `固定快照预判异常，参与阶段将按关键词规则降级: ${error.message || error}`);
-    }
+        if (discoveryMode === 'reuse') {
+            const reusable = discoveryState.selectReusableSnapshot();
+            if (!reusable.valid) {
+                return 'reuse模式未找到有效的正式快照或last-good快照，已中止且不会开始参与';
+            }
+            snapshotFilename = reusable.filename;
+            log.info(
+                '轮转采集',
+                `reuse模式跳过采集，读取${snapshotFilename}中的${reusable.count}条有效候选${reusable.fallback ? '（正式快照无效，已回退last-good）' : ''}`
+            );
+        } else {
+            if (discoveryMode === 'resume') {
+                const resumed = discoveryState.prepareResume(config);
+                if (!resumed.ok) {
+                    return `resume模式无法恢复：${resumed.error}；临时文件保持不变`;
+                }
+                log.info(
+                    '轮转采集',
+                    `resume模式载入断点，已完成${resumed.state.completed_source_ids.length}/${resumed.plan.entries.length}个来源，剩余${resumed.pending.length}个`
+                );
+            }
 
-    if (Number(firstAccount.WAIT) > 0) {
-        log.info('轮转采集', `固定快照完成，${Number(firstAccount.WAIT) / 1000}秒后开始第一轮`);
-        await delay(Number(firstAccount.WAIT));
-    }
-
-    process.env.LOTTERY_SHARED_ONLY = '1';
-    let pendingAccounts = [...accounts];
-    let round = 0;
-    while (pendingAccounts.length) {
-        round += 1;
-        const nextRound = [];
-        log.info('轮转参与', `第${round}轮开始：${pendingAccounts.length}个帐号，每帐号最多成功参与${batchSize}条`);
-
-        for (const [index, account] of pendingAccounts.entries()) {
-            errMsg = await runAccount(account, localhost);
+            process.env.LOTTERY_DISCOVERY_ONLY = '1';
+            process.env.LOTTERY_DISCOVERY_MODE = discoveryMode;
+            log.info(
+                '轮转采集',
+                `帐号${firstAccount.NUMBER}以${discoveryMode}模式生成本轮固定快照`
+            );
+            errMsg = await runAccount(firstAccount, localhost);
+            delete process.env.LOTTERY_DISCOVERY_ONLY;
+            delete process.env.LOTTERY_DISCOVERY_MODE;
             if (errMsg) return errMsg;
-
-            const cookieValid = global_var.get('accountCookieValid');
-            const result = global_var.get('lotteryBatchResult') || {};
-            if (!cookieValid) {
-                log.warn('轮转参与', `帐号${account.NUMBER} Cookie失效，停止该帐号后续轮次`);
-            } else if (result.errorStatus) {
-                log.warn('轮转参与', `帐号${account.NUMBER}遇到停止状态${result.errorStatus}，停止该帐号后续轮次`);
-            } else if (result.needsAnotherRound) {
-                nextRound.push(account);
+            if (!global_var.get('accountCookieValid')) {
+                return `帐号${firstAccount.NUMBER} Cookie失效，无法生成固定快照`;
             }
-
-            log.info(
-                '轮转参与',
-                `帐号${account.NUMBER}本轮尝试${Number(result.attempted) || 0}条，成功${Number(result.successful) || 0}条`
-            );
-
-            if (index < pendingAccounts.length - 1) {
-                await delay(cookieValid ? Number(account.WAIT) || 0 : 3 * 1000);
+            if (!global_var.get('discoveryCommitted')) {
+                return '本轮没有生成有效固定快照，已保留正式文件和可恢复断点且不会开始参与';
             }
         }
 
-        pendingAccounts = nextRound;
-        if (pendingAccounts.length) {
-            log.info(
-                '轮转休息',
-                `第${round}轮结束，仍有${pendingAccounts.length}个帐号未处理完，统一休息${roundCooldown / 60000}分钟`
-            );
-            await delay(roundCooldown);
+        try {
+            const { preJudgeSharedSnapshot } = require('./lib/helper/ai_judge');
+            await preJudgeSharedSnapshot(snapshotFilename);
+        } catch (error) {
+            log.error('AI预判', `固定快照预判异常，参与阶段将按关键词规则降级: ${error.message || error}`);
         }
+
+        if (Number(firstAccount.WAIT) > 0) {
+            log.info('轮转采集', `固定快照完成，${Number(firstAccount.WAIT) / 1000}秒后开始第一轮`);
+            await delay(Number(firstAccount.WAIT));
+        }
+
+        process.env.LOTTERY_SHARED_ONLY = '1';
+        process.env.LOTTERY_SHARED_SNAPSHOT_FILE = snapshotFilename;
+        let pendingAccounts = [...accounts];
+        let round = 0;
+        while (pendingAccounts.length) {
+            round += 1;
+            const nextRound = [];
+            log.info('轮转参与', `第${round}轮开始：${pendingAccounts.length}个帐号，每帐号最多成功参与${batchSize}条`);
+
+            for (const [index, account] of pendingAccounts.entries()) {
+                errMsg = await runAccount(account, localhost);
+                if (errMsg) return errMsg;
+
+                const cookieValid = global_var.get('accountCookieValid');
+                const result = global_var.get('lotteryBatchResult') || {};
+                if (!cookieValid) {
+                    log.warn('轮转参与', `帐号${account.NUMBER} Cookie失效，停止该帐号后续轮次`);
+                } else if (result.errorStatus) {
+                    log.warn('轮转参与', `帐号${account.NUMBER}遇到停止状态${result.errorStatus}，停止该帐号后续轮次`);
+                } else if (result.needsAnotherRound) {
+                    nextRound.push(account);
+                }
+
+                log.info(
+                    '轮转参与',
+                    `帐号${account.NUMBER}本轮尝试${Number(result.attempted) || 0}条，成功${Number(result.successful) || 0}条`
+                );
+
+                if (index < pendingAccounts.length - 1) {
+                    await delay(cookieValid ? Number(account.WAIT) || 0 : 3 * 1000);
+                }
+            }
+
+            pendingAccounts = nextRound;
+            if (pendingAccounts.length) {
+                log.info(
+                    '轮转休息',
+                    `第${round}轮结束，仍有${pendingAccounts.length}个帐号未处理完，统一休息${roundCooldown / 60000}分钟`
+                );
+                await delay(roundCooldown);
+            }
+        }
+
+        log.info('轮转参与', `全部帐号已处理完本轮固定快照，共完成${round}轮`);
+    } finally {
+        delete process.env.LOTTERY_DISCOVERY_ONLY;
+        delete process.env.LOTTERY_DISCOVERY_MODE;
+        delete process.env.LOTTERY_SHARED_ONLY;
+        delete process.env.LOTTERY_SHARED_SNAPSHOT_FILE;
     }
-
-    delete process.env.LOTTERY_SHARED_ONLY;
-    log.info('轮转参与', `全部帐号已处理完本轮固定快照，共完成${round}轮`);
 }
 
 /**
@@ -213,7 +267,15 @@ async function main() {
                     log.info('抽奖', '开始运行');
                     loop_wait = lottery_loop_wait;
                     if (save_lottery_info_to_file) {
-                        await clearLotteryInfo();
+                        if (process.env.LOTTERY_DISCOVERY_ONLY
+                            && process.env.LOTTERY_DISCOVERY_MODE === 'collect') {
+                            const { discoveryState } = require('./lib/helper/discovery_state');
+                            const fresh = discoveryState.startFresh(require('./lib/data/config'));
+                            log.info('轮转采集', `collect模式已新建断点，共${fresh.plan.entries.length}个来源`);
+                        } else if (!(process.env.LOTTERY_DISCOVERY_ONLY
+                            && process.env.LOTTERY_DISCOVERY_MODE === 'resume')) {
+                            await clearLotteryInfo();
+                        }
                     }
                     await start(NUMBER);
                     break;
