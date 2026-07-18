@@ -70,42 +70,6 @@ async function runAccount(account, localhost) {
     }
 }
 
-function buildDiscoveryAttempts(accounts, backupNumbers = []) {
-    const primary = accounts[0];
-    if (!primary) return [];
-    const requested = new Set(
-        (Array.isArray(backupNumbers) ? backupNumbers : [])
-            .map(Number)
-            .filter(number => Number.isSafeInteger(number) && number !== Number(primary.NUMBER))
-    );
-    const backups = accounts.filter(account => requested.has(Number(account.NUMBER)));
-    return [
-        { account: primary, role: 'primary' },
-        { account: primary, role: 'primary-retry' },
-        ...backups.map(account => ({ account, role: 'backup' })),
-    ];
-}
-
-async function executeDiscoveryFailover({
-    attempts,
-    initialMode,
-    cooldown,
-    runAttempt,
-    wait = delay,
-}) {
-    let result = null;
-    for (const [index, attempt] of attempts.entries()) {
-        if (index > 0) await wait(cooldown);
-        result = await runAttempt({
-            ...attempt,
-            mode: index === 0 ? initialMode : 'resume',
-            index,
-        });
-        if (result.committed || result.errMsg || !result.riskTripped) break;
-    }
-    return result;
-}
-
 /**
  * 帐号1先采集固定快照，然后五个帐号按批次轮流参与，直至各自队列清空
  * @param {object[]} accounts
@@ -135,14 +99,6 @@ async function runRoundRobin(accounts, localhost) {
     }
     const batchSize = Math.max(1, Number(config.lottery_batch_size) || 7);
     const roundCooldown = Math.max(0, Number(config.lottery_round_cooldown) || 15 * 60 * 1000);
-    const discoveryRiskCooldown = Math.max(
-        1,
-        Number(config.discovery_risk_cooldown) || 2 * 60 * 1000
-    );
-    const discoveryAttempts = buildDiscoveryAttempts(
-        accounts,
-        config.discovery_failover_accounts
-    );
     let snapshotFilename = 'lottery_info_1.json';
     let errMsg;
 
@@ -175,65 +131,23 @@ async function runRoundRobin(accounts, localhost) {
 
             process.env.LOTTERY_DISCOVERY_ONLY = '1';
             process.env.LOTTERY_DISCOVERY_OWNER_NUMBER = String(firstAccount.NUMBER);
-            const discoveryResult = await executeDiscoveryFailover({
-                attempts: discoveryAttempts,
-                initialMode: discoveryMode,
-                cooldown: discoveryRiskCooldown,
-                runAttempt: async ({ account, role, mode, index }) => {
-                    process.env.LOTTERY_DISCOVERY_MODE = mode;
-                    if (index > 0) {
-                        log.info(
-                            '轮转采集熔断',
-                            role === 'primary-retry'
-                                ? `冷却结束，帐号${account.NUMBER}以resume模式探测并续采`
-                                : `主帐号再次触发风控，切换帐号${account.NUMBER}以resume模式接管采集`
-                        );
-                    } else {
-                        log.info(
-                            '轮转采集',
-                            `帐号${account.NUMBER}以${mode}模式生成本轮固定快照`
-                        );
-                    }
-
-                    const attemptError = await runAccount(account, localhost);
-                    const riskTripped = Boolean(global_var.get('discoveryRiskTripped'));
-                    const riskInfo = global_var.get('discoveryRiskInfo') || null;
-                    const result = {
-                        account,
-                        errMsg: attemptError,
-                        cookieValid: Boolean(global_var.get('accountCookieValid')),
-                        committed: Boolean(global_var.get('discoveryCommitted')),
-                        riskTripped,
-                        riskInfo,
-                    };
-                    if (riskTripped) {
-                        log.warn(
-                            '轮转采集熔断',
-                            `帐号${account.NUMBER}触发${riskInfo?.code || '-352/412'}采集熔断，断点已保留`
-                        );
-                    }
-                    return result;
-                },
-                wait: async milliseconds => {
-                    log.info(
-                        '轮转采集熔断',
-                        `全局冷却${Math.ceil(milliseconds / 1000)}秒，期间不发送B站采集请求`
-                    );
-                    await delay(milliseconds);
-                },
-            });
+            process.env.LOTTERY_DISCOVERY_MODE = discoveryMode;
+            log.info(
+                '轮转采集',
+                `帐号${firstAccount.NUMBER}以${discoveryMode}模式生成本轮固定快照`
+            );
+            const discoveryError = await runAccount(firstAccount, localhost);
+            const cookieValid = Boolean(global_var.get('accountCookieValid'));
+            const committed = Boolean(global_var.get('discoveryCommitted'));
             delete process.env.LOTTERY_DISCOVERY_ONLY;
             delete process.env.LOTTERY_DISCOVERY_MODE;
             delete process.env.LOTTERY_DISCOVERY_OWNER_NUMBER;
 
-            if (discoveryResult?.errMsg) return discoveryResult.errMsg;
-            if (!discoveryResult?.cookieValid) {
-                return `帐号${discoveryResult?.account?.NUMBER || firstAccount.NUMBER} Cookie失效，无法生成固定快照`;
+            if (discoveryError) return discoveryError;
+            if (!cookieValid) {
+                return `帐号${firstAccount.NUMBER} Cookie失效，无法生成固定快照`;
             }
-            if (!discoveryResult?.committed) {
-                if (discoveryResult?.riskTripped) {
-                    return `帐号${discoveryResult.account.NUMBER}触发采集风控且备用帐号已用尽，已保留断点且不会开始参与`;
-                }
+            if (!committed) {
                 return '本轮没有生成有效固定快照，已保留正式文件和可恢复断点且不会开始参与';
             }
         }
@@ -495,8 +409,6 @@ async function cli() {
 if (require.main === module) cli();
 
 module.exports = {
-    buildDiscoveryAttempts,
-    executeDiscoveryFailover,
     runRoundRobin,
     setAccountEnv,
 };

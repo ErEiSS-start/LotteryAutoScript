@@ -121,17 +121,13 @@ module.exports = Object.freeze({
          */
         lottery_discovery_mode: 'collect',
 
-        /** 连续 -352/412 熔断阈值 */
-        discovery_risk_threshold: 3,
-
-        /** 采集熔断冷却时间，单位毫秒 */
-        discovery_risk_cooldown: 2 * 60 * 1000,
-
-        /** 熔断前相邻风控响应最小间隔，单位毫秒 */
-        discovery_risk_retry_wait: 3 * 1000,
-
-        /** 主帐号重试失败后允许接管采集的帐号编号 */
-        discovery_failover_accounts: [2],
+        /** 动态详情遇到 -352/412 后重试当前动态的渐进冷却时间 */
+        dynamic_detail_risk_cooldowns: [
+            3 * 1000,
+            10 * 1000,
+            30 * 1000,
+            2 * 60 * 1000,
+        ],
 
         /**
          * 每个帐号每轮成功参与的数量（不是每日总上限）
@@ -359,18 +355,6 @@ module.exports = Object.freeze({
          * - 单位毫秒
          */
         get_dynamic_detail_wait: 3000,
-
-        /**
-         * - 动态详情连续出现多少次412后开启软熔断
-         * - 熔断只暂停动态详情请求，不影响其他任务
-         */
-        dynamic_detail_412_threshold: 10,
-
-        /**
-         * - 动态详情412软熔断冷却时间
-         * - 冷却后仅放行一次探测请求，单位毫秒
-         */
-        dynamic_detail_412_cooldown: 10 * 60 * 1000,
 
         /**
          * - 过滤间隔(开奖时间/粉丝数)
