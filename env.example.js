@@ -123,8 +123,11 @@ module.exports = Object.freeze({
      */
     ai_parm: {
         // 旧版单供应商Key，保留兼容；没有ZHIPU_API_KEY时也可作为智谱Key
-        AI_API_KEY: '',
+        AI_API_KEY: process.env.AI_API_KEY || '',
         // 智谱GLM-4.7-Flash Key
-        ZHIPU_API_KEY: '',
+        ZHIPU_API_KEY: process.env.ZHIPU_API_KEY || '',
+        // 多个智谱帐号请优先在青龙环境变量中按数字设置；存在编号Key时不再使用上面的单Key
+        ZHIPU_API_KEY_1: process.env.ZHIPU_API_KEY_1 || '',
+        ZHIPU_API_KEY_2: process.env.ZHIPU_API_KEY_2 || '',
     }
 });

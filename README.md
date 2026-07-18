@@ -93,14 +93,16 @@ ENABLE_AI_COMMENTS: true,
 密钥使用独立环境变量，推荐在青龙环境变量中设置，禁止提交到 Git：
 
 ```text
-ZHIPU_API_KEY=智谱密钥
+ZHIPU_API_KEY_1=第一个智谱帐号密钥
+ZHIPU_API_KEY_2=第二个智谱帐号密钥
+ZHIPU_API_KEY_3=第三个智谱帐号密钥
 ```
 
-旧的 `AI_API_KEY` 仍可作为智谱兜底密钥。供应商 URL、模型和参数见 `my_config.example.js` 的 `ai_judge_parm.providers` 与 `ai_comments_parm.providers`。
+编号可以不连续，空值和重复密钥会被忽略。只要存在有效的编号密钥，程序就只使用编号密钥；否则依次回退到单个 `ZHIPU_API_KEY` 和旧版 `AI_API_KEY`。密钥按请求轮换，每个帐号独立记录限流与熔断状态，AI判断和AI评论共用同一密钥池。供应商 URL、模型和参数见 `my_config.example.js` 的 `ai_judge_parm.providers` 与 `ai_comments_parm.providers`。
 
-帐号1提交固定快照后，会以默认并发1集中判断其中所有非官方候选，避免免费GLM帐号触发并发限制错误1302。结果保存到 `lottery_info/ai_judge_cache.json`，同一动态不会在五个帐号和每轮批次中重复请求：明确非抽奖、已结束或有明确开奖时间的结果缓存30天；无法确定开奖时间的有效抽奖缓存24小时。正文、提示词或模型改变时缓存自动失效。官方抽奖仍使用B站官方开奖接口，不交给AI。
+帐号1提交固定快照后，会串行判断其中所有非官方候选，两次真实请求默认间隔3秒；缓存命中不等待。结果保存到 `lottery_info/ai_judge_cache.json`，同一动态不会在五个帐号和每轮批次中重复请求：明确非抽奖、已结束或有明确开奖时间的结果缓存30天；无法确定开奖时间的有效抽奖缓存24小时。正文、提示词或模型改变时缓存自动失效。某候选调用失败后，本次任务的其他帐号不再重复调用；所有密钥均不可用时，剩余候选在本次任务直接退回关键词筛选，下次青龙任务会重新尝试。官方抽奖仍使用B站官方开奖接口，不交给AI。
 
-判断和评论都强制使用结构化 JSON。GLM-4.7-Flash显式关闭思考，减少延迟和无用Token。相关控制项为 `ai_request_timeout`、`ai_provider_retry_count`、`ai_circuit_failure_threshold`、`ai_circuit_cooldown` 和 `ai_judge_concurrency`。
+判断和评论都强制使用结构化 JSON。GLM-4.7-Flash显式关闭思考，减少延迟和无用Token。`429` 或智谱错误码 `1302` 会立即熔断当前密钥并尝试下一个；超时、503或无效响应连续3次才熔断。相关控制项为 `ai_request_timeout`、`ai_provider_retry_count`、`ai_circuit_failure_threshold`、`ai_circuit_cooldown`、`ai_judge_interval` 和 `ai_judge_provider_retry_count`；`ai_judge_concurrency` 仅为旧配置兼容，预判始终串行。
 
 ### 轮转配置
 

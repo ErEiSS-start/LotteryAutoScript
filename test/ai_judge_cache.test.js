@@ -1,10 +1,13 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const config = require('../lib/data/config');
 const {
     AiJudgeCache,
     validateJudgment,
     buildJudgePrompt,
+    preJudgeSharedSnapshot,
+    _resetAiJudgeState,
 } = require('../lib/helper/ai_judge');
 
 (() => {
@@ -52,3 +55,49 @@ const {
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     console.log('ai_judge_cache.test ... ok!');
 })();
+
+(async () => {
+    const previousEnabled = process.env.ENABLE_AI_JUDGE;
+    const previousInterval = config.ai_judge_interval;
+    process.env.ENABLE_AI_JUDGE = 'true';
+    config.ai_judge_interval = 123;
+    _resetAiJudgeState();
+
+    const items = [1, 2, 3, 4].map(number => ({
+        dyid: String(number),
+        des: `候选${number}`,
+        hasOfficialLottery: false,
+    }));
+    const waits = [];
+    const calls = [];
+    const outcomes = [
+        { result: { is_lottery: true }, attempted: true },
+        { result: { is_lottery: true }, cached: true, attempted: false },
+        { result: null, failed: true, attempted: true, stopBatch: true },
+    ];
+    const cache = {
+        get: () => null,
+        flush: () => {},
+    };
+    const stats = await preJudgeSharedSnapshot('unused.json', {
+        items,
+        cache,
+        judge: async item => {
+            calls.push(item.dyid);
+            return outcomes[calls.length - 1];
+        },
+        wait: async milliseconds => waits.push(milliseconds),
+    });
+    assert.deepStrictEqual(calls, ['1', '2', '3'], '所有Key不可用后不应继续请求剩余候选');
+    assert.deepStrictEqual(waits, [123], '只在真实请求之间等待，缓存命中不等待');
+    assert.deepStrictEqual(stats, { total: 4, cached: 1, requested: 1, fallback: 2 });
+
+    config.ai_judge_interval = previousInterval;
+    if (previousEnabled === undefined) delete process.env.ENABLE_AI_JUDGE;
+    else process.env.ENABLE_AI_JUDGE = previousEnabled;
+    _resetAiJudgeState();
+    console.log('ai_judge_serial.test ... ok!');
+})().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});

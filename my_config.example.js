@@ -165,6 +165,10 @@ module.exports = Object.freeze({
         ai_circuit_cooldown: 10 * 60 * 1000,
         // 免费GLM帐号通常只允许较低并发，保持单请求可避免1302。
         ai_judge_concurrency: 1,
+        // AI预判固定串行，真实请求之间等待3秒；缓存命中不等待。
+        ai_judge_interval: 3 * 1000,
+        // 同一候选不在同一智谱帐号上立即重试，失败时直接轮换下一帐号。
+        ai_judge_provider_retry_count: 0,
 
         /**
          * AI判断：仅使用GLM-4.7-Flash。
