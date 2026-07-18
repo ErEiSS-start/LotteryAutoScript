@@ -121,6 +121,18 @@ module.exports = Object.freeze({
          */
         lottery_discovery_mode: 'collect',
 
+        /** 连续 -352/412 熔断阈值 */
+        discovery_risk_threshold: 3,
+
+        /** 采集熔断冷却时间，单位毫秒 */
+        discovery_risk_cooldown: 2 * 60 * 1000,
+
+        /** 熔断前相邻风控响应最小间隔，单位毫秒 */
+        discovery_risk_retry_wait: 3 * 1000,
+
+        /** 主帐号重试失败后允许接管采集的帐号编号 */
+        discovery_failover_accounts: [2],
+
         /**
          * 每个帐号每轮成功参与的数量（不是每日总上限）
          */

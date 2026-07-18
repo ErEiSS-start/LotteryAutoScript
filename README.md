@@ -53,7 +53,15 @@
 
 ```mermaid
 flowchart TD
-    A[帐号1采集] --> B[原子提交固定快照]
+    A[帐号1采集] --> R{触发-352/412熔断?}
+    R -- 否 --> B[原子提交固定快照]
+    R -- 是 --> W[冷却2分钟并由帐号1断点续采]
+    W --> S{再次熔断?}
+    S -- 否 --> B
+    S -- 是 --> T[冷却后由帐号2接管断点]
+    T --> U{帐号2是否完成?}
+    U -- 是 --> B
+    U -- 否 --> X[保留断点并结束]
     B --> C[帐号1处理一批]
     C --> D[帐号2处理一批]
     D --> E[帐号3～5依次处理]
@@ -102,6 +110,10 @@ ZHIPU_API_KEY=智谱密钥
 | --- | ---: | --- |
 | `enable_lottery_round_robin` | `true` | 启用帐号1采集、所有帐号轮转参与 |
 | `lottery_discovery_mode` | `'collect'` | 固定快照模式：重新采集、复用快照或断点续采 |
+| `discovery_risk_threshold` | `3` | 所有采集接口连续出现 `-352/412` 的熔断阈值 |
+| `discovery_risk_cooldown` | `2 * 60 * 1000` | 熔断后的全局冷却时间 |
+| `discovery_risk_retry_wait` | `3 * 1000` | 熔断前相邻风控响应的最小间隔 |
+| `discovery_failover_accounts` | `[2]` | 主帐号再次熔断后允许接管采集的帐号编号 |
 | `lottery_batch_size` | `7` | 每个帐号每轮最多成功参与的条数，不是总上限 |
 | `lottery_round_cooldown` | `15 * 60 * 1000` | 一整轮结束后的全局休息时间，单位毫秒 |
 | `collection_dynamic_max_age_hours` | `48` | 只展开最近多少小时内发布的合集动态 |
@@ -109,7 +121,7 @@ ZHIPU_API_KEY=智谱密钥
 
 帐号1的独立配置需要开启 `save_lottery_info_to_file`，帐号2～5可保持 `LotteryOrder: [3]`。轮转参与阶段程序也会强制所有帐号只读取帐号1的固定快照，避免重复搜索。
 
-合集UID来源使用 `LotteryOrder` 编号 `5`。相关设置统一放在 `my_config.js` 的 `default_config`、普通 `UIDs` 配置之后：填写 `CollectionUIDs: [UID1, UID2]`，用 `collection_uid_scan_page` 自定义每个UID读取页数（默认2），用 `collection_dynamic_max_age_hours` 限制合集发布时间（默认最近48小时），用 `collection_dynamic_keywords` 自定义合集关键词；关键词设为 `[]` 时检查这些UID的所有近期原创动态。发布时间缺失或超出窗口的合集不会读取正文。单页返回 `-352` 时按 `collection_uid_page_352_cooldowns`（默认5/10/20秒）只重试当前页，最终失败会把本轮标记为采集不完整并拒绝覆盖固定快照。默认采集顺序为 `[2, 5, 0, 1, 3]`。
+合集UID来源使用 `LotteryOrder` 编号 `5`。相关设置统一放在 `my_config.js` 的 `default_config`、普通 `UIDs` 配置之后：填写 `CollectionUIDs: [UID1, UID2]`，用 `collection_uid_scan_page` 自定义每个UID读取页数（默认2），用 `collection_dynamic_max_age_hours` 限制合集发布时间（默认最近48小时），用 `collection_dynamic_keywords` 自定义合集关键词；关键词设为 `[]` 时检查这些UID的所有近期原创动态。发布时间缺失或超出窗口的合集不会读取正文。轮转采集期间，分页中的 `-352/412` 由共享熔断处理；旧的 `collection_uid_page_352_cooldowns` 只保留给非轮转兼容流程。默认采集顺序为 `[2, 5, 0, 1, 3]`。
 
 合集Opus网页正文连续读取失败时，会改用动态详情JSON提取正文节点和跳转链接；两条线路都失败会将本轮标记为采集不完整，不覆盖上一份完整快照。无效、空值或为 `0` 的动态ID不会进入共享候选。
 
@@ -143,6 +155,8 @@ ZHIPU_API_KEY=智谱密钥
 - 专栏搜索412不会立即结束进程，也不会把最终能够重试成功的来源判定为残缺。
 - 采集期间只要发生搜索失败、正文失败或熔断跳过，本轮就会标记为不完整：拒绝覆盖正式快照，也不会进入帐号参与阶段。
 - 一旦标记为不完整，会立即结束本轮采集，避免继续扫描其他来源制造无效请求。
+- 专栏、UID/合集分页、话题、正文和动态详情共享同一风控计数。连续3次 `-352/412` 后停止当前来源；帐号1冷却后断点续采，再次失败才让帐号2接管。帐号2也失败时不会继续轮换帐号3～5。
+- 帐号2接管时只替换Cookie、帐号身份、UA和代理；采集来源配置仍沿用帐号1，因此即使帐号2配置为 `LotteryOrder: [3]` 也能继续未完成来源。快照只更新 `lottery_info_1.next.json` 和帐号1断点。按照当前 `collect` 配置，下次定时任务仍会重新采集，而不会自动续用上次断点。
 - 动态详情的 `4101139` 和服务端 `500` 只按配置间隔重试一次；`4101152`、404、已删除及其他明确失败直接跳过，不再连续切换不存在的备用线路。
 - 话题来源改用新版Topic ID和动态分页接口，移除已返回404的旧 `topic_svr` 请求；无效或无法精确解析的话题配置会被简短记录后跳过。
 
@@ -157,12 +171,12 @@ ZHIPU_API_KEY=智谱密钥
 - 旧专栏入口不可用时，先通过 `?from=search` 获取跳转，再使用新版 `/opus/{id}` 入口。
 - 合集中的多个动态 ID 和单篇 Opus 中的单个抽奖动态都可以保留；8 KiB 检查针对页面正文是否完整，不是要求页面必须含有多个动态。
 
-相关设置可在 `my_config.example.js` 中查看：`article_content_max_attempts`、`article_content_retry_wait` 和 `article_search_412_cooldowns`；8 KiB 是代码中的正文完整性下限。
+相关设置可在 `my_config.example.js` 中查看：`article_content_max_attempts`、`article_content_retry_wait` 和 `discovery_risk_*`；`article_search_412_cooldowns` 仅保留给非轮转兼容流程，8 KiB 是代码中的正文完整性下限。
 
 ### 青龙部署注意事项
 
 - 修改源码后，已经运行的 Node.js 进程仍使用内存中缓存的旧模块；新逻辑从下一次任务启动时生效。
-- 建议检索分页间隔保持 2 秒、动态详情间隔保持 3 秒，帐号切换间隔至少 2 分钟；遇到频繁 412 时应继续增大间隔。
+- 建议检索分页间隔保持 2 秒、动态详情间隔保持3秒；连续风控会自动全局冷却2分钟，失败分支同样执行最小间隔，不再高速连续请求。
 - 与其他使用同一 B 站 Cookie 的任务错开执行，尤其不要让高频互动任务和本脚本同时运行。
 - 不建议额外自动执行随机点赞、随机评论、三连或播放视频来伪装真人；这类无意义互动同样会增加帐号行为风险。
 - 更新前建议备份 `env.js`、`my_config.js`、核心源码、`dyids/` 和 `lottery_info/`。Cookie、私有配置及备份文件不要提交到公开仓库。
