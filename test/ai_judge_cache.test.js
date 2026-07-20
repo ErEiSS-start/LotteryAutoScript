@@ -6,6 +6,7 @@ const {
     AiJudgeCache,
     validateJudgment,
     buildJudgePrompt,
+    judgeLotteryInfo,
     preJudgeSharedSnapshot,
     _resetAiJudgeState,
 } = require('../lib/helper/ai_judge');
@@ -63,6 +64,33 @@ const {
     process.env.ENABLE_AI_JUDGE = 'true';
     config.ai_judge_interval = 123;
     config.ai_prejudge_max_outage_wait = 10 * 60 * 1000;
+    _resetAiJudgeState();
+
+    const previousParm = config.ai_judge_parm;
+    const previousKey = process.env.ZHIPU_API_KEY_1;
+    process.env.ZHIPU_API_KEY_1 = 'test-key';
+    config.ai_judge_parm = {
+        providers: [{
+            name: 'test-provider',
+            url: 'https://example.invalid',
+            api_key_env: 'ZHIPU_API_KEY',
+            body: { model: 'test-model' },
+        }],
+        prompt: 'test',
+    };
+    const unavailableResult = await judgeLotteryInfo({
+        dyid: '99',
+        des: '测试抽奖',
+        hasOfficialLottery: false,
+    }, {
+        cache: { get: () => null, set: () => {} },
+        now: () => 123456,
+        request: async () => null,
+    });
+    assert.strictEqual(unavailableResult.stopBatch, false, '可用供应商单条失败不应抛异常或停止整批');
+    config.ai_judge_parm = previousParm;
+    if (previousKey === undefined) delete process.env.ZHIPU_API_KEY_1;
+    else process.env.ZHIPU_API_KEY_1 = previousKey;
     _resetAiJudgeState();
 
     const items = [1, 2, 3, 4].map(number => ({
