@@ -59,8 +59,10 @@ const {
 (async () => {
     const previousEnabled = process.env.ENABLE_AI_JUDGE;
     const previousInterval = config.ai_judge_interval;
+    const previousMaxOutageWait = config.ai_prejudge_max_outage_wait;
     process.env.ENABLE_AI_JUDGE = 'true';
     config.ai_judge_interval = 123;
+    config.ai_prejudge_max_outage_wait = 10 * 60 * 1000;
     _resetAiJudgeState();
 
     const items = [1, 2, 3, 4].map(number => ({
@@ -70,11 +72,8 @@ const {
     }));
     const waits = [];
     const calls = [];
-    const outcomes = [
-        { result: { is_lottery: true }, attempted: true },
-        { result: { is_lottery: true }, cached: true, attempted: false },
-        { result: null, failed: true, attempted: true, stopBatch: true },
-    ];
+    let now = 1000;
+    const attempts = new Map();
     const cache = {
         get: () => null,
         flush: () => {},
@@ -84,15 +83,26 @@ const {
         cache,
         judge: async item => {
             calls.push(item.dyid);
-            return outcomes[calls.length - 1];
+            attempts.set(item.dyid, (attempts.get(item.dyid) || 0) + 1);
+            if (item.dyid === '2') return { result: { is_lottery: true }, cached: true, attempted: false };
+            if (item.dyid === '3' && attempts.get(item.dyid) === 1) {
+                return { result: null, failed: true, attempted: true, stopBatch: true, retryAfter: now + 60000 };
+            }
+            if (item.dyid === '4') return { result: null, failed: true, attempted: true };
+            return { result: { is_lottery: true }, attempted: true };
         },
-        wait: async milliseconds => waits.push(milliseconds),
+        wait: async milliseconds => {
+            waits.push(milliseconds);
+            now += milliseconds;
+        },
+        now: () => now,
     });
-    assert.deepStrictEqual(calls, ['1', '2', '3'], '所有Key不可用后不应继续请求剩余候选');
-    assert.deepStrictEqual(waits, [123], '只在真实请求之间等待，缓存命中不等待');
-    assert.deepStrictEqual(stats, { total: 4, cached: 1, requested: 1, fallback: 2 });
+    assert.deepStrictEqual(calls, ['1', '2', '3', '3', '4'], '临时不可用后应重试同一候选再继续');
+    assert.deepStrictEqual(waits, [123, 60000, 123], '限流等待不应计作关键词降级');
+    assert.deepStrictEqual(stats, { total: 4, cached: 1, requested: 2, fallback: 1 });
 
     config.ai_judge_interval = previousInterval;
+    config.ai_prejudge_max_outage_wait = previousMaxOutageWait;
     if (previousEnabled === undefined) delete process.env.ENABLE_AI_JUDGE;
     else process.env.ENABLE_AI_JUDGE = previousEnabled;
     _resetAiJudgeState();

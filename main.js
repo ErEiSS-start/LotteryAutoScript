@@ -90,15 +90,17 @@ async function runRoundRobin(accounts, localhost) {
     config.updata(firstAccount.NUMBER);
     let discoveryMode;
     try {
-        discoveryMode = normalizeDiscoveryMode(config.lottery_discovery_mode);
+        discoveryMode = normalizeDiscoveryMode(
+            process.env.LOTTERY_DISCOVERY_MODE_OVERRIDE || config.lottery_discovery_mode
+        );
     } catch (error) {
         return error.message;
     }
     if (discoveryMode !== 'reuse' && !config.save_lottery_info_to_file) {
         return `帐号${firstAccount.NUMBER}未开启save_lottery_info_to_file，无法使用${discoveryMode}模式`;
     }
-    const batchSize = Math.max(1, Number(config.lottery_batch_size) || 7);
-    const roundCooldown = Math.max(0, Number(config.lottery_round_cooldown) || 15 * 60 * 1000);
+    const batchSize = Math.max(1, Number(config.lottery_batch_size) || 8);
+    const roundCooldown = Math.max(0, Number(config.lottery_round_cooldown) || 5 * 60 * 1000);
     let snapshotFilename = 'lottery_info_1.json';
     let errMsg;
 
@@ -168,9 +170,12 @@ async function runRoundRobin(accounts, localhost) {
         process.env.LOTTERY_SHARED_SNAPSHOT_FILE = snapshotFilename;
         let pendingAccounts = [...accounts];
         let round = 0;
+        const recentRoundDurations = [];
         while (pendingAccounts.length) {
             round += 1;
+            const roundStartedAt = Date.now();
             const nextRound = [];
+            const remainingByAccount = [];
             log.info('轮转参与', `第${round}轮开始：${pendingAccounts.length}个帐号，每帐号最多成功参与${batchSize}条`);
 
             for (const [index, account] of pendingAccounts.entries()) {
@@ -189,16 +194,34 @@ async function runRoundRobin(accounts, localhost) {
 
                 log.info(
                     '轮转参与',
-                    `帐号${account.NUMBER}本轮尝试${Number(result.attempted) || 0}条，成功${Number(result.successful) || 0}条`
+                    `帐号${account.NUMBER}本轮尝试${Number(result.attempted) || 0}条，成功${Number(result.successful) || 0}条，队列剩余${Number(result.remaining) || 0}条`
                 );
+                remainingByAccount.push({
+                    account: account.NUMBER,
+                    remaining: Math.max(0, Number(result.remaining) || 0),
+                });
 
                 if (index < pendingAccounts.length - 1) {
                     await delay(cookieValid ? Number(account.WAIT) || 0 : 3 * 1000);
                 }
             }
 
+            recentRoundDurations.push(Date.now() - roundStartedAt);
+            if (recentRoundDurations.length > 3) recentRoundDurations.shift();
             pendingAccounts = nextRound;
             if (pendingAccounts.length) {
+                const averageRoundDuration = recentRoundDurations.reduce((sum, value) => sum + value, 0)
+                    / recentRoundDurations.length;
+                const remainingRounds = Math.max(...remainingByAccount
+                    .filter(item => nextRound.some(account => account.NUMBER === item.account))
+                    .map(item => Math.ceil(item.remaining / batchSize)), 0);
+                const estimatedMilliseconds = remainingRounds * averageRoundDuration
+                    + Math.max(0, remainingRounds - 1) * roundCooldown;
+                const estimatedMinutes = Math.ceil(estimatedMilliseconds / 60000);
+                log.info(
+                    '轮转进度',
+                    `${remainingByAccount.map(item => `帐号${item.account}:${item.remaining}`).join('，')}；预计还需约${estimatedMinutes}分钟（按最近${recentRoundDurations.length}轮速度估算）`
+                );
                 log.info(
                     '轮转休息',
                     `第${round}轮结束，仍有${pendingAccounts.length}个帐号未处理完，统一休息${roundCooldown / 60000}分钟`

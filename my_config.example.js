@@ -132,12 +132,15 @@ module.exports = Object.freeze({
         /**
          * 每个帐号每轮成功参与的数量（不是每日总上限）
          */
-        lottery_batch_size: 7,
+        lottery_batch_size: 8,
 
         /**
          * 五个帐号完成一轮后的统一休息时间，单位毫秒
          */
-        lottery_round_cooldown: 15 * 60 * 1000,
+        lottery_round_cooldown: 5 * 60 * 1000,
+
+        /** 轮转筛选汇总中每类最多显示的样例数，0表示只显示数量 */
+        lottery_filter_log_detail_limit: 5,
 
         /**
          * API发送数据类型 {LotteryInfo[]}
@@ -159,6 +162,10 @@ module.exports = Object.freeze({
         ai_provider_retry_count: 1,
         ai_circuit_failure_threshold: 3,
         ai_circuit_cooldown: 10 * 60 * 1000,
+        // 1305代表模型公共资源繁忙，按模型冷却后切换其他模型。
+        ai_model_busy_cooldown: 2 * 60 * 1000,
+        // 全部AI账号不可用时最多等待30分钟，再对剩余候选使用关键词降级。
+        ai_prejudge_max_outage_wait: 30 * 60 * 1000,
         // 免费GLM帐号通常只允许较低并发，保持单请求可避免1302。
         ai_judge_concurrency: 1,
         // AI预判固定串行，真实请求之间等待3秒；缓存命中不等待。
@@ -167,17 +174,17 @@ module.exports = Object.freeze({
         ai_judge_provider_retry_count: 0,
 
         /**
-         * AI判断：仅使用GLM-4.7-Flash。
+         * AI判断：使用稳定的免费GLM-4-Flash-250414处理批量分类。
          * 每个非官方动态只判断一次，并跨帐号复用lottery_info目录中的缓存。
          */
         ai_judge_parm: {
             providers: [
                 {
-                    name: 'glm-4.7-flash',
+                    name: 'glm-4-flash-250414',
                     url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
                     api_key_env: 'ZHIPU_API_KEY',
                     body: {
-                        model: 'glm-4.7-flash',
+                        model: 'glm-4-flash-250414',
                         max_tokens: 300,
                         temperature: 0.1,
                         thinking: { type: 'disabled' }
@@ -461,7 +468,7 @@ module.exports = Object.freeze({
             '坚持不懈，迎难而上，开拓创新！', '[OK][OK]', '我来抽个奖', '中中中中中中', '[doge][doge][doge]', '我我我',
         ],
 
-        /** AI评论仅使用GLM-4.7-Flash */
+        /** AI评论优先GLM-4.7-Flash，模型繁忙时回退GLM-4-Flash-250414 */
         ai_comments_parm: {
             providers: [
                 {
@@ -473,6 +480,16 @@ module.exports = Object.freeze({
                         max_tokens: 100,
                         temperature: 0.8,
                         thinking: { type: 'disabled' }
+                    }
+                },
+                {
+                    name: 'glm-4-flash-250414',
+                    url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+                    api_key_env: 'ZHIPU_API_KEY',
+                    body: {
+                        model: 'glm-4-flash-250414',
+                        max_tokens: 100,
+                        temperature: 0.8,
                     }
                 }
             ],

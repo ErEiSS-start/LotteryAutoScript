@@ -40,6 +40,8 @@ assert.strictEqual(utils.isValidDynamicId('0'), false);
 assert.strictEqual(utils.isValidDynamicId(0), false);
 assert.strictEqual(utils.isValidDynamicId(''), false);
 assert.strictEqual(utils.isValidDynamicId('1225299005006675986'), true);
+assert.strictEqual(utils.isValidDynamicId('9223372036854775808'), false);
+assert.strictEqual(utils.isValidDynamicId('9999999999999999999'), false);
 assert.deepStrictEqual(
     normalizeTopicReference({ id: 1267572, name: '互动抽奖活动' }),
     { id: 1267572, name: '互动抽奖活动' }

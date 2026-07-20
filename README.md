@@ -50,6 +50,7 @@
 5. 所有仍有待处理候选的帐号完成一轮后，统一休息 `lottery_round_cooldown`。
 6. 不限制总轮数，直到每个帐号都处理完整份快照；已经处理完的帐号不会进入下一轮。
 7. 可选的 `CollectionUIDs` 来源会固定读取指定UP的2页动态，只展开最近 `collection_dynamic_max_age_hours` 小时内的疑似合集，并从Opus正文链接中批量提取动态ID。
+8. 每个帐号首次筛选后会生成 `lottery_info/lottery_queue_帐号号.json`；后续轮次直接续接队列，不再反复扫描整份快照。成功和确定无需参与的候选会立即原子移出，临时失败则保留。
 
 ```mermaid
 flowchart TD
@@ -69,7 +70,7 @@ flowchart TD
     F -- 否 --> H[本次任务结束]
 ```
 
-这里的“7条”是每轮批次大小，不是每日总上限。例如固定快照中有 50 条且五个帐号都可正常参与时，每个帐号最多分 8 轮处理，前 7 轮结束后各有一次全局冷却，最后一轮处理余下 1 条。
+这里的“8条”是每轮批次大小，不是每日总上限。例如固定快照中有 50 条且五个帐号都可正常参与时，每个帐号最多分 7 轮处理，前 6 轮结束后各有一次全局冷却，最后一轮处理余下 2 条。每轮日志会列出各帐号剩余数量，并根据最近3轮速度估算剩余时间。
 
 预约抽奖也会延后到参与阶段并计入批次，不会在筛选阶段一次性预约全部候选。预约接口返回 `75003`（活动已结束）时会直接跳过评论、关注、点赞和转发，并记录该候选避免下轮重复处理。
 
@@ -77,9 +78,9 @@ flowchart TD
 
 成功发布的AI评论保存在 `comment_history/successful_comments.json`，默认保留30天，因此任务重启后仍能避免不同帐号在同一动态下使用相似句式。可通过 `ai_comment_retry_count`、`ai_comment_similarity_threshold`、`ai_comment_history_days` 和 `ai_comment_short_max_length` 调整；历史读取或保存失败只记录警告，不会中断参与流程。
 
-### AI 判断与 GLM-4.7-Flash
+### AI 判断与 GLM-4-Flash / GLM-4.7-Flash
 
-抽奖判断和AI评论统一使用智谱免费模型 `glm-4.7-flash`。模型遇到超时、限流、服务错误、空响应或无效 JSON 时，连续失败会触发默认10分钟熔断；熔断期间判断退回 `key_words` 规则，评论退回本地自然短评。
+批量抽奖判断默认使用 `glm-4-flash-250414`，AI评论优先使用 `glm-4.7-flash`，繁忙时回退 `glm-4-flash-250414`。模型遇到超时、限流、服务错误、空响应或无效 JSON 时会自动切换；评论全部失败才退回本地自然短评。
 
 在 `env.js` 的 `account_parm` 中启用：
 
@@ -98,9 +99,9 @@ ZHIPU_API_KEY_3=第三个智谱帐号密钥
 
 编号可以不连续，空值和重复密钥会被忽略。只要存在有效的编号密钥，程序就只使用编号密钥；否则依次回退到单个 `ZHIPU_API_KEY` 和旧版 `AI_API_KEY`。密钥按请求轮换，每个帐号独立记录限流与熔断状态，AI判断和AI评论共用同一密钥池。供应商 URL、模型和参数见 `my_config.example.js` 的 `ai_judge_parm.providers` 与 `ai_comments_parm.providers`。
 
-帐号1提交固定快照后，会串行判断其中所有非官方候选，两次真实请求默认间隔3秒；缓存命中不等待。结果保存到 `lottery_info/ai_judge_cache.json`，同一动态不会在五个帐号和每轮批次中重复请求：明确非抽奖、已结束或有明确开奖时间的结果缓存30天；无法确定开奖时间的有效抽奖缓存24小时。正文、提示词或模型改变时缓存自动失效。某候选调用失败后，本次任务的其他帐号不再重复调用；所有密钥均不可用时，剩余候选在本次任务直接退回关键词筛选，下次青龙任务会重新尝试。官方抽奖仍使用B站官方开奖接口，不交给AI。
+帐号1提交固定快照后，会串行判断其中所有非官方候选，两次真实请求默认间隔3秒；缓存命中不等待。结果保存到 `lottery_info/ai_judge_cache.json`，同一动态不会在五个帐号和每轮批次中重复请求：明确非抽奖、已结束或有明确开奖时间的结果缓存30天；无法确定开奖时间的有效抽奖缓存24小时。正文、提示词或模型改变时缓存自动失效。所有模型或密钥暂时不可用时，脚本等待最早恢复时间并重试当前候选，默认累计等待最多30分钟后才将剩余候选降级到关键词筛选。官方抽奖仍使用B站官方开奖接口，不交给AI。
 
-判断和评论都强制使用结构化 JSON。GLM-4.7-Flash显式关闭思考，减少延迟和无用Token。`429` 或智谱错误码 `1302` 会立即熔断当前密钥并尝试下一个；超时、503或无效响应连续3次才熔断。相关控制项为 `ai_request_timeout`、`ai_provider_retry_count`、`ai_circuit_failure_threshold`、`ai_circuit_cooldown`、`ai_judge_interval` 和 `ai_judge_provider_retry_count`；`ai_judge_concurrency` 仅为旧配置兼容，预判始终串行。
+判断和评论都强制使用结构化 JSON，并显式关闭思考，减少延迟和无用Token。`429` 或错误码 `1302` 只熔断当前密钥并尝试下一个智谱帐号；错误码 `1305` 表示模型公共资源繁忙，会冷却该模型并直接尝试其他模型，不会逐个消耗同模型密钥。超时、503或无效响应连续3次才熔断。相关控制项为 `ai_request_timeout`、`ai_provider_retry_count`、`ai_circuit_failure_threshold`、`ai_circuit_cooldown`、`ai_model_busy_cooldown`、`ai_prejudge_max_outage_wait`、`ai_judge_interval` 和 `ai_judge_provider_retry_count`；`ai_judge_concurrency` 仅为旧配置兼容，预判始终串行。
 
 ### 轮转配置
 
@@ -111,8 +112,9 @@ ZHIPU_API_KEY_3=第三个智谱帐号密钥
 | `enable_lottery_round_robin` | `true` | 启用帐号1采集、所有帐号轮转参与 |
 | `lottery_discovery_mode` | `'collect'` | 固定快照模式：重新采集、复用快照或断点续采 |
 | `dynamic_detail_risk_cooldowns` | `[3000, 10000, 30000, 120000]` | 动态详情 `-352/412` 的渐进冷却，最后一档持续复用 |
-| `lottery_batch_size` | `7` | 每个帐号每轮最多成功参与的条数，不是总上限 |
-| `lottery_round_cooldown` | `15 * 60 * 1000` | 一整轮结束后的全局休息时间，单位毫秒 |
+| `lottery_batch_size` | `8` | 每个帐号每轮最多成功参与的条数，不是总上限 |
+| `lottery_round_cooldown` | `5 * 60 * 1000` | 一整轮结束后的全局休息时间，单位毫秒 |
+| `lottery_filter_log_detail_limit` | `5` | 首次筛选汇总中每类最多列出的样例数，设0只显示计数 |
 | `collection_dynamic_max_age_hours` | `48` | 只展开最近多少小时内发布的合集动态 |
 | `create_dy` | `false` | 不额外发布随机动态 |
 
@@ -130,9 +132,11 @@ ZHIPU_API_KEY_3=第三个智谱帐号密钥
 
 - `lottery_discovery_mode: 'collect'`（默认）会让帐号1重新采集：先清空本轮临时结果，再逐个来源写入 `lottery_info_1.next.json`，完整扫描结束后原子替换 `lottery_info_1.json`。
 - `lottery_discovery_mode: 'reuse'` 会完全跳过帐号1采集，直接使用现有 `lottery_info_1.json`；正式快照缺失、损坏或没有有效动态ID时自动回退 `lottery_info_1.last-good.json`。此模式不限制文件年龄，两份文件都无效时严格中止。
+- 临时只想复用一次时，可给任务增加环境变量 `LOTTERY_DISCOVERY_MODE_OVERRIDE=reuse`，无需改写持久配置；下次未设置该变量时仍按 `lottery_discovery_mode` 执行。
 - `lottery_discovery_mode: 'resume'` 会读取 `lottery_info_1.discovery-state.json` 和 `lottery_info_1.next.json`，仅继续尚未完成的专栏关键词、合集UID、普通UID、话题、API或文本来源。来源顺序、来源值或影响采集的分页/时间配置发生变化，或者任一断点文件缺失、损坏时都会严格中止，不会擅自重新采集或覆盖文件。
 - 每完成一个来源都会原子更新断点；同一来源重新执行时覆盖该来源的临时结果，避免重复追加。采集因正文或分页读取失败被标记为不完整时会保留 `.next.json` 和断点，之后可手动切换为 `resume`。动态详情风控会在当前进程内冷却并继续，不再切换帐号或提前结束采集。
 - 新快照只包含本轮采集结果，不会混入上一次扫描的旧候选。
+- 队列同时校验快照内容哈希和筛选配置签名。快照或关键筛选设置变化时自动新建队列，并把旧文件改名保留为 `.stale-时间戳`，不会静默删除进度。
 - 替换前的有效文件保存为 `lottery_info_1.last-good.json`。
 - 完整扫描结束但没有任何有效候选时会保留上一份正式文件并中止本轮参与；若确实要直接使用旧结果，请显式选择 `reuse`。
 - 每个帐号继续使用独立的 `dyids/dyid*.txt` 保存处理进度；任务中断后，下次运行会跳过已经处理的动态。

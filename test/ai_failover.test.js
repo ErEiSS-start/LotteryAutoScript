@@ -153,7 +153,38 @@ const {
         configured: 3,
         available: 2,
         allUnavailable: false,
+        nextAvailableAt: 62000,
     });
+
+    _resetAiProviderState();
+    const busyProviders = [
+        ...poolProviders.slice(0, 2).map(provider => ({
+            ...provider,
+            body: { model: 'glm-4.7-flash' },
+        })),
+        {
+            name: 'bulk-fallback',
+            url: 'https://zhipu.invalid',
+            api_key_env: 'TEST_POOL_KEY_3',
+            body: { model: 'glm-4-flash-250414' },
+        },
+    ];
+    const busyCalls = [];
+    const busyFallback = await requestAiWithFailover({
+        providers: busyProviders,
+        retryCount: 0,
+        modelBusyCooldown: 120000,
+        now: poolNow,
+        validate: value => JSON.parse(value),
+        transport: async provider => {
+            busyCalls.push(provider.name);
+            return provider.body.model === 'glm-4.7-flash'
+                ? { ok: false, error: 'code: 1305, 模型当前访问量过大' }
+                : { ok: true, content: '{"ok":true}' };
+        },
+    });
+    assert.strictEqual(busyFallback.provider, 'bulk-fallback');
+    assert.deepStrictEqual(busyCalls, ['account-1', 'bulk-fallback'], '1305应按模型冷却，不应逐个消耗同模型帐号');
 
     _resetAiProviderState();
     await requestAiWithFailover({
