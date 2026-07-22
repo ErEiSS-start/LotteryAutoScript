@@ -42,6 +42,19 @@ assert.strictEqual(utils.isValidDynamicId(''), false);
 assert.strictEqual(utils.isValidDynamicId('1225299005006675986'), true);
 assert.strictEqual(utils.isValidDynamicId('9223372036854775808'), false);
 assert.strictEqual(utils.isValidDynamicId('9999999999999999999'), false);
+assert.strictEqual(utils.isEnvEnabled('FLAG', { FLAG: true }), true);
+assert.strictEqual(utils.isEnvEnabled('FLAG', { FLAG: 'ON' }), true);
+assert.strictEqual(utils.isEnvEnabled('FLAG', { FLAG: false }), false);
+assert.strictEqual(utils.isEnvEnabled('FLAG', { FLAG: 'false' }), false);
+assert.strictEqual(utils.isEnvEnabled('FLAG', { FLAG: '0' }), false);
+assert.strictEqual(
+    utils.matchesLotteryKeywords('普通视频，感谢观看', ['[抽奖送揪]|福利', '[转关评粉赞]|参与']),
+    false
+);
+assert.strictEqual(
+    utils.matchesLotteryKeywords('转发并关注，抽一位送奖品', ['[抽奖送揪]|福利|奖品', '[转关评粉赞]|参与']),
+    true
+);
 assert.deepStrictEqual(
     normalizeTopicReference({ id: 1267572, name: '互动抽奖活动' }),
     { id: 1267572, name: '互动抽奖活动' }

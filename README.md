@@ -3,7 +3,7 @@
 - [AutoScript](#autoscript)
   - [本 Fork 的增强功能](#本-fork-的增强功能)
     - [多帐号共享采集与轮转参与](#多帐号共享采集与轮转参与)
-    - [AI 判断与 GLM-4.7-Flash](#ai-判断与-glm-47-flash)
+    - [本地判断与可选 AI](#本地判断与可选-ai)
     - [轮转配置](#轮转配置)
     - [固定快照与断点恢复](#固定快照与断点恢复)
     - [-352 与 412 风控](#-352-与-412-风控)
@@ -78,14 +78,14 @@ flowchart TD
 
 成功发布的AI评论保存在 `comment_history/successful_comments.json`，默认保留30天，因此任务重启后仍能避免不同帐号在同一动态下使用相似句式。可通过 `ai_comment_retry_count`、`ai_comment_similarity_threshold`、`ai_comment_history_days` 和 `ai_comment_short_max_length` 调整；历史读取或保存失败只记录警告，不会中断参与流程。
 
-### AI 判断与 GLM-4-Flash / GLM-4.7-Flash
+### 本地判断与可选 AI
 
-批量抽奖判断默认使用 `glm-4-flash-250414`，AI评论优先使用 `glm-4.7-flash`，繁忙时回退 `glm-4-flash-250414`。模型遇到超时、限流、服务错误、空响应或无效 JSON 时会自动切换；评论全部失败才退回本地自然短评。
+当前推荐使用原有 `key_words` 本地规则判断抽奖，仅保留AI生成差异化评论。这样不会让模型绕过关键词规则放行无关视频，也省去固定快照的AI预判时间。仓库仍保留可选的AI判断能力，之后需要时可以重新开启。
 
 在 `env.js` 的 `account_parm` 中启用：
 
 ```js
-ENABLE_AI_JUDGE: true,
+ENABLE_AI_JUDGE: false,
 ENABLE_AI_COMMENTS: true,
 ```
 
@@ -99,7 +99,7 @@ ZHIPU_API_KEY_3=第三个智谱帐号密钥
 
 编号可以不连续，空值和重复密钥会被忽略。只要存在有效的编号密钥，程序就只使用编号密钥；否则依次回退到单个 `ZHIPU_API_KEY` 和旧版 `AI_API_KEY`。密钥按请求轮换，每个帐号独立记录限流与熔断状态，AI判断和AI评论共用同一密钥池。供应商 URL、模型和参数见 `my_config.example.js` 的 `ai_judge_parm.providers` 与 `ai_comments_parm.providers`。
 
-帐号1提交固定快照后，会串行判断其中所有非官方候选，两次真实请求默认间隔3秒；缓存命中不等待。结果保存到 `lottery_info/ai_judge_cache.json`，同一动态不会在五个帐号和每轮批次中重复请求：明确非抽奖、已结束或有明确开奖时间的结果缓存30天；无法确定开奖时间的有效抽奖缓存24小时。正文、提示词或模型改变时缓存自动失效。所有模型或密钥暂时不可用时，脚本等待最早恢复时间并重试当前候选，默认累计等待最多30分钟后才将剩余候选降级到关键词筛选。官方抽奖仍使用B站官方开奖接口，不交给AI。
+关闭 `ENABLE_AI_JUDGE` 后，固定快照不会发出AI判断请求，非官方候选必须同时满足 `key_words` 中的全部规则；`is_imitator` 应保持 `false`，避免UID来源绕过关键词。AI判断缓存会保留在磁盘但不会参与筛选。若重新开启AI判断，帐号1会串行预判非官方候选并复用 `lottery_info/ai_judge_cache.json`。
 
 判断和评论都强制使用结构化 JSON，并显式关闭思考，减少延迟和无用Token。`429` 或错误码 `1302` 只熔断当前密钥并尝试下一个智谱帐号；错误码 `1305` 表示模型公共资源繁忙，会冷却该模型并直接尝试其他模型，不会逐个消耗同模型密钥。超时、503或无效响应连续3次才熔断。相关控制项为 `ai_request_timeout`、`ai_provider_retry_count`、`ai_circuit_failure_threshold`、`ai_circuit_cooldown`、`ai_model_busy_cooldown`、`ai_prejudge_max_outage_wait`、`ai_judge_interval` 和 `ai_judge_provider_retry_count`；`ai_judge_concurrency` 仅为旧配置兼容，预判始终串行。
 

@@ -61,6 +61,18 @@ const {
     const previousEnabled = process.env.ENABLE_AI_JUDGE;
     const previousInterval = config.ai_judge_interval;
     const previousMaxOutageWait = config.ai_prejudge_max_outage_wait;
+    process.env.ENABLE_AI_JUDGE = 'false';
+    let disabledJudgeCalls = 0;
+    const disabledStats = await preJudgeSharedSnapshot('unused.json', {
+        items: [{ dyid: 'disabled-1', des: '抽奖候选', hasOfficialLottery: false }],
+        judge: async () => {
+            disabledJudgeCalls += 1;
+            return { result: { is_lottery: true } };
+        },
+    });
+    assert.strictEqual(disabledJudgeCalls, 0, '关闭AI判断时不得发起预判请求');
+    assert.deepStrictEqual(disabledStats, { total: 0, cached: 0, requested: 0, fallback: 0 });
+
     process.env.ENABLE_AI_JUDGE = 'true';
     config.ai_judge_interval = 123;
     config.ai_prejudge_max_outage_wait = 10 * 60 * 1000;
