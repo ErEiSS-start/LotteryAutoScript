@@ -171,6 +171,7 @@ async function runRoundRobin(accounts, localhost) {
         let pendingAccounts = [...accounts];
         let round = 0;
         const recentRoundDurations = [];
+        const preservedAccounts = [];
         while (pendingAccounts.length) {
             round += 1;
             const roundStartedAt = Date.now();
@@ -190,6 +191,12 @@ async function runRoundRobin(accounts, localhost) {
                     log.warn('轮转参与', `帐号${account.NUMBER}遇到停止状态${result.errorStatus}，停止该帐号后续轮次`);
                 } else if (result.needsAnotherRound) {
                     nextRound.push(account);
+                } else if (Number(result.remaining) > 0) {
+                    preservedAccounts.push(account.NUMBER);
+                    log.warn(
+                        '轮转参与',
+                        `帐号${account.NUMBER}仍有${Number(result.remaining)}条暂缓候选，保留到下次任务继续`
+                    );
                 }
 
                 log.info(
@@ -230,7 +237,14 @@ async function runRoundRobin(accounts, localhost) {
             }
         }
 
-        log.info('轮转参与', `全部帐号已处理完本轮固定快照，共完成${round}轮`);
+        if (preservedAccounts.length) {
+            log.warn(
+                '轮转参与',
+                `本次轮转结束，共完成${round}轮；帐号${preservedAccounts.join('、')}仍有暂缓候选，下次任务继续`
+            );
+        } else {
+            log.info('轮转参与', `全部帐号已处理完本轮固定快照，共完成${round}轮`);
+        }
     } finally {
         delete process.env.LOTTERY_DISCOVERY_ONLY;
         delete process.env.LOTTERY_DISCOVERY_MODE;

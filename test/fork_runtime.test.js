@@ -19,6 +19,7 @@ const {
     selectDiverseCommentFallback,
     selectUniqueCommentFallback,
     validateAiComment,
+    deferFailedRelay,
 } = require('../lib/core/monitor');
 const { CommentHistoryStore } = require('../lib/helper/comment_history');
 const { resolveRedirectUrl } = require('../lib/net/http');
@@ -156,6 +157,33 @@ assert.strictEqual(bili._getReserveLotteryStatus(0), 0);
 assert.strictEqual(bili._getReserveLotteryStatus(7604003), 0);
 assert.strictEqual(bili._getReserveLotteryStatus(75003), 2);
 assert.strictEqual(bili._getReserveLotteryStatus(-1), 1);
+assert.strictEqual(bili._parseAutoRelayStatus('{"code":0}'), 0);
+assert.strictEqual(bili._parseAutoRelayStatus('{"code":1101004}'), 2);
+assert.strictEqual(bili._parseAutoRelayStatus('{"code":2201116}'), 3);
+assert.strictEqual(bili._parseAutoRelayStatus('{"code":1101008}'), 4);
+assert.strictEqual(bili._parseAutoRelayStatus('{"code":4126117}'), 5);
+assert.strictEqual(bili._parseAutoRelayStatus('[请求失败]: 请求超时'), 1);
+
+const deferredRelayCandidate = {
+    dyid: '1227735301598740501',
+    rid: 'comment-rid',
+    chat: '已成功发送的评论',
+    chat_type: 17,
+};
+let deferredDyid = '';
+assert.strictEqual(
+    deferFailedRelay({
+        defer(dyid) {
+            deferredDyid = dyid;
+            return true;
+        }
+    }, deferredRelayCandidate),
+    true
+);
+assert.strictEqual(deferredDyid, '1227735301598740501');
+assert.strictEqual(deferredRelayCandidate.rid, undefined);
+assert.strictEqual(deferredRelayCandidate.chat, undefined);
+assert.strictEqual(deferredRelayCandidate.chat_type, 0);
 
 assert.strictEqual(normalizeAiComment(' 参与一下，期待开奖！🎉 '), '参与一下期待开奖');
 const usedComments = new Map([
