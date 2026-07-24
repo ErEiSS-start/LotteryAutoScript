@@ -168,6 +168,9 @@ async function runRoundRobin(accounts, localhost) {
 
         process.env.LOTTERY_SHARED_ONLY = '1';
         process.env.LOTTERY_SHARED_SNAPSHOT_FILE = snapshotFilename;
+        const commentAccountNumbers = accounts.map(account => String(account.NUMBER));
+        const commentSlots = new Map(commentAccountNumbers.map((number, index) => [number, index]));
+        process.env.LOTTERY_COMMENT_ACCOUNT_NUMBERS = JSON.stringify(commentAccountNumbers);
         let pendingAccounts = [...accounts];
         let round = 0;
         const recentRoundDurations = [];
@@ -180,6 +183,7 @@ async function runRoundRobin(accounts, localhost) {
             log.info('轮转参与', `第${round}轮开始：${pendingAccounts.length}个帐号，每帐号最多成功参与${batchSize}条`);
 
             for (const [index, account] of pendingAccounts.entries()) {
+                process.env.LOTTERY_COMMENT_SLOT = String(commentSlots.get(String(account.NUMBER)) || 0);
                 errMsg = await runAccount(account, localhost);
                 if (errMsg) return errMsg;
 
@@ -251,6 +255,8 @@ async function runRoundRobin(accounts, localhost) {
         delete process.env.LOTTERY_SHARED_ONLY;
         delete process.env.LOTTERY_SHARED_SNAPSHOT_FILE;
         delete process.env.LOTTERY_DISCOVERY_OWNER_NUMBER;
+        delete process.env.LOTTERY_COMMENT_ACCOUNT_NUMBERS;
+        delete process.env.LOTTERY_COMMENT_SLOT;
     }
 }
 

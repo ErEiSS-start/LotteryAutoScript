@@ -12,9 +12,14 @@ const {
 const {
     Monitor,
     buildAiCommentPrompt,
+    buildAiCommentPackPrompt,
+    completeCommentPack,
     getAiCommentSimilarity,
+    getCommentPackContext,
+    getCommentPackSignature,
     getMaxAiCommentSimilarity,
     normalizeAiComment,
+    parseAiCommentPackResponse,
     parseAiCommentResponse,
     selectDiverseCommentFallback,
     selectUniqueCommentFallback,
@@ -22,6 +27,7 @@ const {
     deferFailedRelay,
 } = require('../lib/core/monitor');
 const { CommentHistoryStore } = require('../lib/helper/comment_history');
+const { CommentPackStore } = require('../lib/helper/comment_pack_store');
 const { resolveRedirectUrl } = require('../lib/net/http');
 const utils = require('../lib/utils');
 const bili = require('../lib/net/bili');
@@ -216,6 +222,16 @@ assert.deepStrictEqual(
     parseAiCommentResponse('{"comment":"蹲个结果","has_explicit_requirement":false}'),
     { comment: '蹲个结果', hasExplicitRequirement: false }
 );
+assert.deepStrictEqual(
+    parseAiCommentPackResponse(
+        '{"comments":["蹲个结果","看看运气"],"has_explicit_requirement":false}'
+    ),
+    {
+        comments: ['蹲个结果', '看看运气'],
+        hasExplicitRequirement: false,
+    }
+);
+assert.strictEqual(parseAiCommentPackResponse('not-json'), null);
 assert.strictEqual(validateAiComment('蹲个结果').valid, true);
 assert.strictEqual(validateAiComment('进群1064716925领好礼').valid, false);
 assert.strictEqual(validateAiComment('快来参与🎉').valid, false);
@@ -247,6 +263,83 @@ assert.notStrictEqual(
         rejectionReason: '',
     })
 );
+assert.ok(buildAiCommentPackPrompt('', {
+    accountCount: 5,
+    previousComments: ['蹲个结果'],
+}).includes('comments必须恰好包含5条'));
+
+assert.deepStrictEqual(getCommentPackContext({
+    LOTTERY_COMMENT_ACCOUNT_NUMBERS: '["1","2","3","4","5"]',
+    LOTTERY_COMMENT_SLOT: '3',
+    NUMBER: '4',
+}), {
+    accounts: ['1', '2', '3', '4', '5'],
+    slot: 3,
+});
+assert.deepStrictEqual(getCommentPackContext({
+    LOTTERY_COMMENT_ACCOUNT_NUMBERS: 'invalid',
+    NUMBER: '5',
+}), {
+    accounts: ['5'],
+    slot: 0,
+});
+
+const packSignature = getCommentPackSignature(
+    '1223378158235942914',
+    '原始动态正文',
+    ['1', '2', '3', '4', '5'],
+    {
+        prompt: '生成评论',
+        providers: [{ name: 'glm', url: 'https://example.test', body: { model: 'glm' } }],
+    }
+);
+assert.strictEqual(packSignature.length, 64);
+assert.notStrictEqual(
+    packSignature,
+    getCommentPackSignature(
+        '1223378158235942914',
+        '另一份动态正文',
+        ['1', '2', '3', '4', '5'],
+        {
+            prompt: '生成评论',
+            providers: [{ name: 'glm', url: 'https://example.test', body: { model: 'glm' } }],
+        }
+    )
+);
+
+const completedPack = completeCommentPack({
+    dyid: '1223378158235942914',
+    accountCount: 5,
+    parsed: {
+        comments: ['蹲个结果', '蹲个结果', '进群1064716925领好礼', '', '这个挺喜欢'],
+        hasExplicitRequirement: false,
+    },
+    usedComments: new Map(),
+    recentNormalized: new Set(),
+    similarityThreshold: 0.57,
+    maxLength: 15,
+});
+assert.strictEqual(completedPack.comments.length, 5);
+assert.strictEqual(completedPack.aiCount, 2);
+assert.strictEqual(completedPack.localCount, 3);
+assert.strictEqual(new Set(completedPack.comments.map(normalizeAiComment)).size, 5);
+completedPack.comments.forEach(comment => assert.strictEqual(validateAiComment(comment).valid, true));
+
+const explicitPack = completeCommentPack({
+    dyid: '1223378158235942914',
+    accountCount: 5,
+    parsed: {
+        comments: ['指定口令'],
+        hasExplicitRequirement: true,
+    },
+    usedComments: new Map(),
+    recentNormalized: new Set(),
+    similarityThreshold: 0.57,
+    maxLength: 15,
+});
+assert.deepStrictEqual(explicitPack.comments, Array(5).fill('指定口令'));
+assert.strictEqual(explicitPack.aiCount, 5);
+assert.strictEqual(explicitPack.localCount, 0);
 
 const historyDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'lottery-comment-history-'));
 const historyPath = path.join(historyDirectory, 'successful_comments.json');
@@ -278,6 +371,48 @@ const corruptHistory = new CommentHistoryStore({
 assert.deepStrictEqual(corruptHistory.getRecent(), []);
 fs.rmSync(historyDirectory, { recursive: true, force: true });
 
+const packDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'lottery-comment-pack-'));
+const packPath = path.join(packDirectory, 'ai_comment_packs.json');
+let packNow = 2_000_000_000_000;
+const packStore = new CommentPackStore({
+    filePath: packPath,
+    retentionDays: 30,
+    now: () => packNow,
+    logger: quietLogger,
+});
+assert.strictEqual(packStore.remember({
+    dyid: '1223378158235942914',
+    signature: packSignature,
+    accounts: ['1', '2', '3', '4', '5'],
+    comments: completedPack.comments,
+    aiCount: completedPack.aiCount,
+    localCount: completedPack.localCount,
+}), true);
+const reloadedPackStore = new CommentPackStore({
+    filePath: packPath,
+    retentionDays: 30,
+    now: () => packNow,
+    logger: quietLogger,
+});
+assert.deepStrictEqual(
+    reloadedPackStore.get('1223378158235942914', packSignature).comments,
+    completedPack.comments
+);
+packNow += 31 * 24 * 60 * 60 * 1000;
+assert.strictEqual(
+    reloadedPackStore.get('1223378158235942914', packSignature),
+    null
+);
+fs.writeFileSync(packPath, '{invalid json', 'utf8');
+const corruptPackStore = new CommentPackStore({
+    filePath: packPath,
+    retentionDays: 30,
+    now: () => packNow,
+    logger: quietLogger,
+});
+assert.strictEqual(corruptPackStore.get('1223378158235942914', packSignature), null);
+fs.rmSync(packDirectory, { recursive: true, force: true });
+
 const filterSource = Monitor.prototype.filterLotteryInfo.toString();
 const goSource = Monitor.prototype.go.toString();
 const uidSource = Searcher.prototype.getLotteryInfoByUID.toString();
@@ -286,6 +421,7 @@ assert.ok(filterSource.includes('isValidDynamicId'));
 assert.ok(uidSource.includes('源动态ID无效'));
 assert.ok(uidSource.indexOf('源动态ID无效') < uidSource.indexOf('getOneDynamicByDyid'));
 assert.ok(goSource.includes('getUniqueAiComment'));
+assert.ok(goSource.includes('getPackedAiComment'));
 assert.ok(goSource.includes('return 6002'));
 assert.ok(goSource.indexOf('return 6002') < goSource.indexOf('/* 评论 */'));
 assert.ok(goSource.indexOf('} else if (status)') < goSource.indexOf('rememberSuccessfulComment'));

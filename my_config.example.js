@@ -468,7 +468,7 @@ module.exports = Object.freeze({
             '坚持不懈，迎难而上，开拓创新！', '[OK][OK]', '我来抽个奖', '中中中中中中', '[doge][doge][doge]', '我我我',
         ],
 
-        /** AI评论优先GLM-4.7-Flash，模型繁忙时回退GLM-4-Flash-250414 */
+        /** AI评论：同一动态一次生成全部帐号的评论 */
         ai_comments_parm: {
             providers: [
                 {
@@ -481,25 +481,17 @@ module.exports = Object.freeze({
                         temperature: 0.8,
                         thinking: { type: 'disabled' }
                     }
-                },
-                {
-                    name: 'glm-4-flash-250414',
-                    url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-                    api_key_env: 'ZHIPU_API_KEY',
-                    body: {
-                        model: 'glm-4-flash-250414',
-                        max_tokens: 100,
-                        temperature: 0.8,
-                    }
                 }
             ],
             prompt: '根据动态要求生成简短、自然且不重复的B站评论。'
         },
 
         /**
-         * AI评论差异化：初次生成不合格后最多重试2次；相似度达到0.57时重试。
-         * 成功评论保留30天用于跨任务去重；没有明确口令时生成不超过15字的短评。
+         * 评论包默认启用；同一动态只生成一次并跨帐号、跨任务复用。
+         * ai_comment_retry_count仅在关闭评论包、回退旧版逐帐号生成时使用。
          */
+        ai_comment_pack_enabled: true,
+        ai_comment_provider_retry_count: 0,
         ai_comment_retry_count: 2,
         ai_comment_similarity_threshold: 0.57,
         ai_comment_history_days: 30,

@@ -74,9 +74,11 @@ flowchart TD
 
 预约抽奖也会延后到参与阶段并计入批次，不会在筛选阶段一次性预约全部候选。预约接口返回 `75003`（活动已结束）时会直接跳过评论、关注、点赞和转发，并记录该候选避免下轮重复处理。
 
-启用AI评论时，筛选固定快照不会再为全部候选提前调用AI。每个帐号只在候选真正进入当前批次时生成评论；同一动态会比较已成功发布评论的字符相似度，不再只检查完全重复。默认最多重试2次，仍不合格时使用低相似自然短评。模型会优先遵守明确的评论口令，否则生成2～15字短评，并拒绝复述群号、链接、进群或购买引导及表情符号。
+启用AI评论包后，筛选固定快照不会为全部候选提前调用AI。某个动态第一次真正进入参与批次时，只请求一次模型并同时生成全部帐号的评论，之后各帐号按固定槽位取用。评论包保存在 `comment_history/ai_comment_packs.json`，任务重启后也会复用，不会因帐号轮转而再次请求模型。
 
-成功发布的AI评论保存在 `comment_history/successful_comments.json`，默认保留30天，因此任务重启后仍能避免不同帐号在同一动态下使用相似句式。可通过 `ai_comment_retry_count`、`ai_comment_similarity_threshold`、`ai_comment_history_days` 和 `ai_comment_short_max_length` 调整；历史读取或保存失败只记录警告，不会中断参与流程。
+模型结果缺少条目、重复、过长或含群号、链接、进群、购买引导及表情时，程序会立即用本地低相似短评补齐，不再为改善措辞反复调用AI。明确要求统一评论口令时允许不同帐号使用相同内容。错误码 `1302` 会切换下一枚密钥；`1305` 会冷却当前模型并直接本地补齐。
+
+成功发布的评论仍保存在 `comment_history/successful_comments.json`，默认保留30天，用于避免跨动态、跨任务过度复用。相关配置为 `ai_comment_pack_enabled`、`ai_comment_provider_retry_count`、`ai_comment_similarity_threshold`、`ai_comment_history_days` 和 `ai_comment_short_max_length`。将 `ai_comment_pack_enabled` 设为 `false` 可回退旧版逐帐号生成，此时才使用 `ai_comment_retry_count`。缓存读取或保存失败只记录警告，不会中断参与流程。
 
 ### 本地判断与可选 AI
 
