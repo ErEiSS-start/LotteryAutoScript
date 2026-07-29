@@ -356,6 +356,18 @@ buvid3亦可不填 使用随机生成值
 
 > 填写在env.js内
 
+本 Fork 对中奖私信采用本地待领取记录：
+
+- 检测到符合 `notice_key_words` 的中奖私信后不会自动标记为已读。
+- 记录保存在 `lottery_info/pending_wins_<帐号UID>.json`，即使私信后来被读取，
+  后续检查仍不会丢失。
+- 默认每 2 小时重复推送所有待领取记录；可通过
+  `winner_reminder_interval` 自定义提醒间隔。
+- 当脚本检测到本人在对应 B 站私信会话中发送了回复，会把记录标记为
+  `acknowledged` 并停止后续提醒。
+- `winner_reply_check_size` 控制用于判断本人回复的近期消息数量，B 站接口单次最多
+  读取 20 条，默认值为 20。
+
 以下是支持的推送方式
 
 |        Name        |                                        归属                                        | 说明                                                                                                                                                                                                                        |

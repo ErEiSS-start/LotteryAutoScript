@@ -352,6 +352,16 @@ module.exports = Object.freeze({
         update_session_wait: 1000,
 
         /**
+         * 待领取中奖私信重复提醒间隔，默认2小时
+         */
+        winner_reminder_interval: 2 * 60 * 60 * 1000,
+
+        /**
+         * 判断本人是否回复时读取的近期私信条数，B站接口单次最多20条
+         */
+        winner_reply_check_size: 20,
+
+        /**
          * - 读取下一页关注列表间隔
          * - 单位毫秒
          */
