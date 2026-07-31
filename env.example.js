@@ -1,5 +1,11 @@
 module.exports = Object.freeze({
     /**
+     * 自动读取青龙中所有启用的 Ray_BiliBiliCookies__数字。
+     * 开启后 multiple_account_parm 仅作为账号设置模板，其中的 COOKIE 不会参与运行。
+     */
+    AUTO_IMPORT_RAY_BILIBILI_COOKIES: false,
+
+    /**
      * ## 账号相关
      * - `COOKIE` 是必填项
      * - `NOTE` 帐号备注

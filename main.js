@@ -71,7 +71,7 @@ async function runAccount(account, localhost) {
 }
 
 /**
- * 帐号1先采集固定快照，然后五个帐号按批次轮流参与，直至各自队列清空
+ * 帐号1先采集固定快照，然后所有帐号按批次轮流参与，直至各自队列清空
  * @param {object[]} accounts
  * @param {import('https').Agent} localhost
  * @returns {Promise<string|undefined>}
@@ -266,9 +266,17 @@ async function runRoundRobin(accounts, localhost) {
 async function main() {
     const { COOKIE, NUMBER, CLEAR, ENABLE_MULTIPLE_ACCOUNT, MULTIPLE_ACCOUNT_PARM } = process.env;
     if (ENABLE_MULTIPLE_ACCOUNT) {
-        let muti_acco = multiple_account.length
-            ? multiple_account
-            : JSON.parse(MULTIPLE_ACCOUNT_PARM);
+        let muti_acco = multiple_account;
+        if (!muti_acco.length && MULTIPLE_ACCOUNT_PARM) {
+            try {
+                muti_acco = JSON.parse(MULTIPLE_ACCOUNT_PARM);
+            } catch (_) {
+                return 'MULTIPLE_ACCOUNT_PARM不是有效JSON';
+            }
+        }
+        if (!Array.isArray(muti_acco) || !muti_acco.length) {
+            return '未找到可用的多帐号Cookie；若已开启Ray Cookie自动导入，请检查青龙中的Ray_BiliBiliCookies__*';
+        }
 
         process.env.ENABLE_MULTIPLE_ACCOUNT = '';
         const localhost = request.globalAgent;
@@ -385,6 +393,25 @@ function initEnv() {
         env.init();
         log.init();
         log.info('环境变量初始化', '成功加载env.js文件');
+        const importSummary = env.get_account_import_summary();
+        if (importSummary.enabled) {
+            log.info(
+                'Ray Cookie自动导入',
+                `成功导入${importSummary.importedVariables.length}个帐号：${importSummary.importedVariables.join(', ') || '无'}`
+            );
+            if (importSummary.invalidVariables.length) {
+                log.warn(
+                    'Ray Cookie自动导入',
+                    `跳过格式不完整或内容为空的变量：${importSummary.invalidVariables.join(', ')}`
+                );
+            }
+            if (importSummary.duplicateVariables.length) {
+                log.warn(
+                    'Ray Cookie自动导入',
+                    `跳过UID重复的变量：${importSummary.duplicateVariables.join(', ')}`
+                );
+            }
+        }
     } else if (hasEnv('COOKIE') || hasEnv('MULTIPLE_ACCOUNT_PARM')) {
         log.init();
         log.info('环境变量初始化', '成功从环境变量中读取COOKIE设置');

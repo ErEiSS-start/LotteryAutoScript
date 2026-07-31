@@ -135,7 +135,7 @@ module.exports = Object.freeze({
         lottery_batch_size: 8,
 
         /**
-         * 五个帐号完成一轮后的统一休息时间，单位毫秒
+         * 所有帐号完成一轮后的统一休息时间，单位毫秒
          */
         lottery_round_cooldown: 5 * 60 * 1000,
 
