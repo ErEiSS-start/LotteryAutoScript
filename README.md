@@ -8,6 +8,7 @@
     - [固定快照与断点恢复](#固定快照与断点恢复)
     - [-352 与 412 风控](#-352-与-412-风控)
     - [专栏与新版 Opus 兼容](#专栏与新版-opus-兼容)
+    - [双青龙分片部署](#双青龙分片部署)
     - [青龙部署注意事项](#青龙部署注意事项)
   - [操作步骤](#操作步骤)
     - [获取COOKIE](#获取cookie)
@@ -117,6 +118,7 @@ ZHIPU_API_KEY_3=第三个智谱帐号密钥
 | 配置项 | 推荐值 | 说明 |
 | --- | ---: | --- |
 | `enable_lottery_round_robin` | `true` | 启用帐号1采集、所有帐号轮转参与 |
+| `lottery_discovery_config_number` | `1` | 分片实例的首个实际帐号不是1时，仍复用哪组完整采集配置 |
 | `lottery_discovery_mode` | `'collect'` | 固定快照模式：重新采集、复用快照或断点续采 |
 | `dynamic_detail_risk_cooldowns` | `[3000, 10000, 30000, 120000]` | 动态详情 `-352/412` 的渐进冷却，最后一档持续复用 |
 | `lottery_batch_size` | `8` | 每个帐号每轮最多成功参与的条数，不是总上限 |
@@ -176,6 +178,29 @@ ZHIPU_API_KEY_3=第三个智谱帐号密钥
 - 合集中的多个动态 ID 和单篇 Opus 中的单个抽奖动态都可以保留；8 KiB 检查针对页面正文是否完整，不是要求页面必须含有多个动态。
 
 相关设置可在 `my_config.example.js` 中查看：`article_content_max_attempts`、`article_content_retry_wait`、`dynamic_detail_risk_cooldowns` 和 `article_search_412_cooldowns`；8 KiB 是代码中的正文完整性下限。
+
+### 双青龙分片部署
+
+两台青龙可以各自保留一部分 `Ray_BiliBiliCookies__数字`，并独立采集、独立参与。帐号编号继续采用 Ray 环境变量后缀加1，因此主服务器保留 `__0`～`__3` 时运行帐号1～4，副服务器保留 `__4`～`__7` 时运行帐号5～8，不会因迁移而重排帐号或混用进度文件。
+
+副服务器首个实际帐号为5时：
+
+- 用 `lottery_discovery_config_number: 1` 继续加载 `config_1` 的完整采集来源。
+- 采集断点和快照自动写入 `lottery_info_5.*`，不会错误读写帐号1文件。
+- 配置中的 `file://lottery_info_1.json` 会在采集阶段自动映射为 `file://lottery_info_5.json`。
+- 参与阶段帐号5～8共享该实例的 `lottery_info_5.json`。
+
+建议在青龙环境变量中分别设置：
+
+```text
+# 主服务器
+LOTTERY_INSTANCE_NAME=主服务器
+
+# 副服务器
+LOTTERY_INSTANCE_NAME=副服务器
+```
+
+实例名会出现在日志帐号标签和通知标题中。完整迁移清单、错峰时间和回滚方法见 [双青龙分片部署说明](doc/qinglong_dual_server.md)。
 
 ### 青龙部署注意事项
 

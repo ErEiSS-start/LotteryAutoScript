@@ -112,6 +112,12 @@ module.exports = Object.freeze({
         save_lottery_info_to_file: false,
 
         /**
+         * 轮转采集使用哪一组配置。
+         * 分片部署时副服务器首个帐号可为5，但仍可用config_1执行完整采集。
+         */
+        lottery_discovery_config_number: 1,
+
+        /**
          * 多帐号轮转参与：帐号1先生成固定快照，随后所有帐号每轮各处理一批
          */
         enable_lottery_round_robin: true,

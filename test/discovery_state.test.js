@@ -98,6 +98,25 @@ assert.strictEqual(manager.selectReusableSnapshot().valid, false);
 
 resumedManager.finish();
 assert.strictEqual(fs.existsSync(path.join(directory, 'lottery_info_1.discovery-state.json')), false);
+
+const shardManager = new DiscoveryStateManager({ directory, now: () => ++now });
+assert.strictEqual(shardManager.useAccount(5), shardManager);
+assert.deepStrictEqual(shardManager.filenames(), {
+    final: 'lottery_info_5.json',
+    next: 'lottery_info_5.next.json',
+    backup: 'lottery_info_5.last-good.json',
+    state: 'lottery_info_5.discovery-state.json',
+});
+shardManager.startFresh(config);
+assert.strictEqual(
+    fs.existsSync(path.join(directory, 'lottery_info_5.discovery-state.json')),
+    true
+);
+assert.throws(() => shardManager.useAccount(6), /仍属于帐号5/);
+shardManager.finish();
+assert.strictEqual(shardManager.useAccount(6).number, 6);
+assert.throws(() => shardManager.useAccount(0), /编号无效/);
+
 fs.rmSync(directory, { recursive: true, force: true });
 
 console.log('discovery state tests passed');

@@ -21,6 +21,7 @@ module.exports = Object.freeze({
      * 
      * ## 调试相关
      * - `LOTTERY_LOG_LEVEL` 输出日志等级 Error<Warn<Notice<Info<Debug 0<1<2<3<4
+     * - `LOTTERY_INSTANCE_NAME` 多服务器部署时显示在日志和推送标题中的实例名
      * - `NOT_GO_LOTTERY` 关闭抽奖行为
      *
      * ## 多账号
@@ -48,6 +49,7 @@ module.exports = Object.freeze({
         MULTIPLE_ACCOUNT_PARM: '',
 
         LOTTERY_LOG_LEVEL: 3,
+        LOTTERY_INSTANCE_NAME: '',
         NOT_GO_LOTTERY: ''
     },
 

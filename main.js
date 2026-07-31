@@ -87,7 +87,20 @@ async function runRoundRobin(accounts, localhost) {
 
     if (!firstAccount) return '未配置可用帐号';
 
-    config.updata(firstAccount.NUMBER);
+    config.init();
+    const configuredDiscoveryNumber = Number(
+        process.env.LOTTERY_DISCOVERY_CONFIG_NUMBER
+        || config.lottery_discovery_config_number
+    );
+    const fallbackDiscoveryNumber = Number(firstAccount.NUMBER);
+    const discoveryConfigNumber = Number.isSafeInteger(configuredDiscoveryNumber)
+        && configuredDiscoveryNumber > 0
+        ? configuredDiscoveryNumber
+        : Number.isSafeInteger(fallbackDiscoveryNumber) && fallbackDiscoveryNumber > 0
+            ? fallbackDiscoveryNumber
+            : 1;
+    config.updata(discoveryConfigNumber);
+    discoveryState.useAccount(firstAccount.NUMBER);
     let discoveryMode;
     try {
         discoveryMode = normalizeDiscoveryMode(
@@ -101,10 +114,11 @@ async function runRoundRobin(accounts, localhost) {
     }
     const batchSize = Math.max(1, Number(config.lottery_batch_size) || 8);
     const roundCooldown = Math.max(0, Number(config.lottery_round_cooldown) || 5 * 60 * 1000);
-    let snapshotFilename = 'lottery_info_1.json';
+    let snapshotFilename = discoveryState.filenames().final;
     let errMsg;
 
     loop_wait = 0;
+    process.env.LOTTERY_DISCOVERY_CONFIG_NUMBER = String(discoveryConfigNumber);
     delete process.env.LOTTERY_SHARED_ONLY;
     delete process.env.LOTTERY_SHARED_SNAPSHOT_FILE;
 
@@ -255,6 +269,7 @@ async function runRoundRobin(accounts, localhost) {
         delete process.env.LOTTERY_SHARED_ONLY;
         delete process.env.LOTTERY_SHARED_SNAPSHOT_FILE;
         delete process.env.LOTTERY_DISCOVERY_OWNER_NUMBER;
+        delete process.env.LOTTERY_DISCOVERY_CONFIG_NUMBER;
         delete process.env.LOTTERY_COMMENT_ACCOUNT_NUMBERS;
         delete process.env.LOTTERY_COMMENT_SLOT;
     }
