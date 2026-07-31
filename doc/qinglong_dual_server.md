@@ -1,24 +1,25 @@
 # 双青龙分片部署
 
-本文以8个 B 站帐号为例：
+本文以8个 B 站帐号为例。每台青龙都使用本地连续序号，实例名称用于区分服务器：
 
 - 主服务器：`Ray_BiliBiliCookies__0`～`Ray_BiliBiliCookies__3`，对应帐号1～4。
-- 副服务器：`Ray_BiliBiliCookies__4`～`Ray_BiliBiliCookies__7`，对应帐号5～8。
+- 副服务器：同样使用`Ray_BiliBiliCookies__0`～`Ray_BiliBiliCookies__3`，在副服务器日志中对应帐号1～4。
 - 两台服务器都独立采集候选，不跨服务器同步快照或队列。
 - 新帐号以后可加入任一服务器；不要在两台服务器同时启用同一个 Cookie。
+- 两台青龙数据库彼此独立，因此环境变量名称相同不会冲突。
 
 ## 上线顺序
 
 1. 在副服务器新装同版本青龙，先不要启用任何定时任务。
 2. 为副服务器配置独立的青龙 Client ID、Client Secret 和 `QL_URL`。
 3. 拉取本 Fork，复制 `env.js`、`my_config.js`，但不要复制旧服务器的全部日志和青龙数据库。
-4. 只在副服务器添加 `Ray_BiliBiliCookies__4`～`__7`，以及所需的推送、AI 密钥。
+4. 将迁往副服务器的4个 Cookie 按顺序保存为`Ray_BiliBiliCookies__0`～`__3`，并添加所需的推送、AI 密钥。
 5. 设置 `LOTTERY_INSTANCE_NAME=副服务器`；主服务器设置为 `主服务器`。
 6. 确认副服务器 `my_config.js` 中 `lottery_discovery_config_number: 1`。
 7. 先手动运行帐号检查，再手动运行一次中奖检查。
-8. 手动执行一次启动抽奖，确认日志显示“副服务器 帐号5”，并生成 `lottery_info_5.json`。
+8. 手动执行一次启动抽奖，确认日志显示“副服务器 帐号1”，并生成 `lottery_info_1.json`。
 9. 启用副服务器错峰任务。
-10. 确认副服务器稳定后，才从主服务器禁用或删除 `Ray_BiliBiliCookies__4`～`__7`。
+10. 确认副服务器稳定后，才从主服务器禁用或删除原先代表这些帐号的 Cookie 变量。
 
 最后一步之前，主服务器继续保留8个帐号，避免迁移未完成时帐号5～8漏跑。
 
@@ -63,6 +64,10 @@
 - LotteryAutoScript 的 `lottery_info_*`、`lottery_queue_*`、`dyid*.txt` 和断点文件。
 - 每台服务器启用的 Ray Cookie 子集。
 
+从已有部署迁移时，可一次性把帐号历史重命名后复制到副服务器，例如原帐号5～8的
+`dyid5.txt`～`dyid8.txt`依次映射为`dyid.txt`、`dyid2.txt`～`dyid4.txt`。不要复制
+`lottery_info_*`、`lottery_queue_*`或采集断点；副服务器必须重新独立采集。
+
 可以复制：
 
 - `env.js` 和 `my_config.js` 的非 Cookie 配置。
@@ -84,10 +89,10 @@
 
 副服务器至少满足以下条件后才切走主服务器后四个帐号：
 
-- 日志显示 `[副服务器 帐号5 ...]`。
-- Ray 自动导入只列出 `Ray_BiliBiliCookies__4`～`__7`。
-- 采集成功生成 `lottery_info_5.json`，没有误用 `lottery_info_1.json`。
-- 帐号5～8各自生成或续用独立队列。
+- 日志显示 `[副服务器 帐号1 ...]`。
+- Ray 自动导入只列出 `Ray_BiliBiliCookies__0`～`__3`。
+- 采集成功生成副服务器自己的 `lottery_info_1.json`。
+- 副服务器帐号1～4各自生成或续用独立队列。
 - 中奖检查推送标题带 `[副服务器]`。
 - BiliBiliToolPro 能读取4个 Cookie，且不会与主服务器同一帐号重复执行。
 
@@ -96,6 +101,6 @@
 如果副服务器异常：
 
 1. 立即禁用副服务器的 LotteryAutoScript 和 BiliBiliToolPro 定时任务。
-2. 在主服务器重新启用 `Ray_BiliBiliCookies__4`～`__7`。
+2. 在主服务器重新启用原先代表迁移帐号的 Cookie 变量。
 3. 保留副服务器日志、快照和队列用于排查，不要删除。
 4. 主服务器下一轮会继续按其原有进度运行；确认稳定后再重新安排迁移。
