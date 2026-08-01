@@ -13,7 +13,9 @@
 - 2 秒一次的可选自动追踪。
 - 目录按需展开，不一次递归加载整棵日志树。
 - 只允许访问配置的日志根目录，并拒绝符号链接越界。
-- HTTP Basic Auth；用户名默认 `logs`，随机密码首次启动时生成并保存到状态目录。
+- 独立登录页；用户名默认 `logs`，随机密码首次启动时生成并保存到状态目录。
+- 登录后签发长期有效的 HttpOnly、Secure、SameSite 签名 Cookie，不在浏览器保存明文密码。
+- 登录失败 5 次后按客户端限制 15 分钟，避免密码被持续尝试。
 - 在窄窗口中固定使用视口高度和内部滚动，避免日志末行与滚动条底部被裁切。
 - 登录后可查看本机完整中奖私信，并手动“取消提醒”或“恢复提醒”。
 - 取消提醒只写入独立的 `web_state/dismissed-wins.json` 账本，不修改、标记已读或删除 B 站私信。
@@ -28,7 +30,7 @@
 - LotteryAutoScript：`/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript`
 - 取消提醒账本：`LotteryAutoScript/web_state/dismissed-wins.json`
 
-主副服务器使用相同 Basic Auth 凭据。实例名称和另一台服务器地址通过
+主副服务器使用相同登录凭据与签名密钥。实例名称和另一台服务器地址通过
 `/etc/qinglong-log-viewer.env` 配置：
 
 ```ini
@@ -36,9 +38,9 @@ VIEWER_INSTANCE=主服务器
 PEER_VIEWER_URL=https://qinglong2.example.com/log-viewer/
 ```
 
-如果希望浏览器只输入一次密码，可把副服务器通过主域名的另一条路径反向代理，
+如果希望浏览器只登录一次，可把副服务器通过主域名的另一条路径反向代理，
 参考 `deploy/nginx-single-login-location.conf`，并把主服务器的 `PEER_VIEWER_URL`
-指向同域地址（例如 `https://qinglong.example.com/log-viewer-2/`）。浏览器访问副服务器
-原域名时仍会按独立站点要求认证。
+指向同域地址（例如 `https://qinglong.example.com/log-viewer-2/`）。登录页会同时签发
+适用于 `/log-viewer` 和 `/log-viewer-2` 的同源会话 Cookie。
 
 青龙升级或容器重建不会覆盖本服务，因为程序和 systemd 单元均位于容器外。

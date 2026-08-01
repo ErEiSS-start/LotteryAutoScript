@@ -4,13 +4,20 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createLogServer } = require('../server');
+const {
+    createLoginLimiter,
+    createLogServer,
+    createSessionValue,
+    validSessionValue,
+} = require('../server');
+
+let sessionCookie = '';
 
 async function request(baseUrl, pathname, authenticated = true, options = {}) {
     return fetch(`${baseUrl}${pathname}`, {
         ...options,
         headers: {
-            ...(authenticated ? { Authorization: `Basic ${Buffer.from('logs:test-token').toString('base64')}` } : {}),
+            ...(authenticated && sessionCookie ? { Cookie: sessionCookie } : {}),
             ...(options.headers || {}),
         },
     });
@@ -28,6 +35,19 @@ function winAction(baseUrl, action, body, actionHeader = true) {
 }
 
 (async () => {
+    const fixedSession = createSessionValue('secret', 2000, () => Buffer.alloc(18, 1));
+    assert.strictEqual(validSessionValue(fixedSession, 'secret', 1000), true);
+    assert.strictEqual(validSessionValue(fixedSession, 'secret', 2001), false);
+    assert.strictEqual(validSessionValue(`${fixedSession}x`, 'secret', 1000), false);
+    let limiterNow = 1000;
+    const limiter = createLoginLimiter({ now: () => limiterNow, maxFailures: 2, blockMs: 5000 });
+    assert.strictEqual(limiter.allowed('client'), true);
+    limiter.fail('client');
+    limiter.fail('client');
+    assert.strictEqual(limiter.allowed('client'), false);
+    limiterNow += 5001;
+    assert.strictEqual(limiter.allowed('client'), true);
+
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ql-log-viewer-'));
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ql-log-outside-'));
     const procRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ql-log-proc-'));
@@ -102,6 +122,36 @@ function winAction(baseUrl, action, body, actionHeader = true) {
 
     let response = await request(baseUrl, '/api/list', false);
     assert.strictEqual(response.status, 401);
+
+    response = await request(baseUrl, '/', false);
+    assert.strictEqual(response.status, 200);
+    assert.match(await response.text(), /登录日志查看器/);
+
+    response = await request(baseUrl, '/api/list', false, {
+        headers: { Authorization: `Basic ${Buffer.from('logs:test-token').toString('base64')}` },
+    });
+    assert.strictEqual(response.status, 401, '旧 Basic Auth 不应绕过新登录页');
+
+    response = await request(baseUrl, '/api/login', false, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'logs', password: 'wrong-token' }),
+    });
+    assert.strictEqual(response.status, 401);
+
+    response = await request(baseUrl, '/api/login', false, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'logs', password: 'test-token' }),
+    });
+    assert.strictEqual(response.status, 200);
+    const setCookie = response.headers.get('set-cookie');
+    assert.match(setCookie, /HttpOnly/);
+    assert.match(setCookie, /Secure/);
+    assert.match(setCookie, /SameSite=Strict/);
+    assert.match(setCookie, /Path=\/log-viewer/);
+    assert.match(setCookie, /Path=\/log-viewer-2/);
+    sessionCookie = `qlv_session=${setCookie.match(/qlv_session=([^;]+)/)[1]}`;
 
     response = await request(baseUrl, '/api/list');
     let payload = await response.json();
@@ -195,6 +245,14 @@ function winAction(baseUrl, action, body, actionHeader = true) {
 
     response = await request(baseUrl, '/api/meta?path=escape.log');
     assert.strictEqual(response.status, 403);
+
+    response = await request(baseUrl, '/api/logout', true, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+    });
+    assert.strictEqual(response.status, 200);
+    assert.match(response.headers.get('set-cookie'), /Max-Age=0/);
 
     await new Promise(resolve => server.close(resolve));
     fs.rmSync(root, { recursive: true, force: true });

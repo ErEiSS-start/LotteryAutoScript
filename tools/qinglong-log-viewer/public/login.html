@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>登录 · 青龙日志</title>
+  <link rel="stylesheet" href="./styles.css?v=5">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-card" aria-labelledby="loginTitle">
+      <div class="brand-mark" aria-hidden="true">QL</div>
+      <div>
+        <p class="login-kicker">QingLong Log Viewer</p>
+        <h1 id="loginTitle">登录日志查看器</h1>
+        <p class="login-description">登录成功后会在此浏览器中保持登录。除非主动退出、清除浏览器数据或更换密码，否则无需再次输入。</p>
+      </div>
+
+      <form id="loginForm" class="login-form">
+        <label>
+          <span>用户名</span>
+          <input id="loginUsername" name="username" type="text" value="logs" autocomplete="username" required autofocus>
+        </label>
+        <label>
+          <span>密码</span>
+          <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button id="loginSubmit" type="submit">登录并保持登录</button>
+      </form>
+      <p id="loginError" class="login-error" role="alert"></p>
+      <p class="login-security">会话 Cookie 使用 HttpOnly、Secure 和签名校验，不保存明文密码。</p>
+    </section>
+  </main>
+  <script src="./login.js?v=1" defer></script>
+</body>
+</html>

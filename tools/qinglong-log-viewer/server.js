@@ -12,6 +12,9 @@ const DEFAULT_LOG_ROOT = '/opt/1panel/apps/qinglong/qinglong/data/log';
 const DEFAULT_TOKEN_FILE = '/var/lib/qinglong-log-viewer/token';
 const DEFAULT_PROC_ROOT = '/proc';
 const DEFAULT_LOTTERY_ROOT = '/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript';
+const SESSION_COOKIE = 'qlv_session';
+const SESSION_COOKIE_PATHS = Object.freeze(['/log-viewer', '/log-viewer-2']);
+const DEFAULT_SESSION_DAYS = 3650;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 // eslint-disable-next-line no-control-regex, no-useless-escape
 const ANSI_PATTERN = /[\u001B\u009B][[\]()#;?]*(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d\/#&.:=?%@~_]+)*)?\u0007|(?:(?:\d{1,4}(?:[;:]\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g;
@@ -67,18 +70,103 @@ function isSameSecret(left, right) {
     return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function parseBasicAuth(header = '') {
-    if (!header.startsWith('Basic ')) return null;
+function base64Url(value) {
+    return Buffer.from(value).toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/g, '');
+}
+
+function signSession(payload, secret) {
+    return base64Url(crypto.createHmac('sha256', secret).update(payload).digest());
+}
+
+function createSessionValue(secret, expiresAt, randomBytes = crypto.randomBytes) {
+    const payload = `v1.${Math.floor(expiresAt)}.${base64Url(randomBytes(18))}`;
+    return `${payload}.${signSession(payload, secret)}`;
+}
+
+function validSessionValue(value, secret, now = Date.now()) {
+    if (typeof value !== 'string' || value.length > 256) return false;
+    const fragments = value.split('.');
+    if (fragments.length !== 4 || fragments[0] !== 'v1' || !/^\d+$/.test(fragments[1])) return false;
+    const expiresAt = Number(fragments[1]);
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= now) return false;
+    const payload = fragments.slice(0, 3).join('.');
+    return isSameSecret(fragments[3], signSession(payload, secret));
+}
+
+function parseCookies(header = '') {
+    const cookies = {};
+    String(header).split(';').forEach(fragment => {
+        const separator = fragment.indexOf('=');
+        if (separator < 1) return;
+        const name = fragment.slice(0, separator).trim();
+        const value = fragment.slice(separator + 1).trim();
+        if (name && cookies[name] === undefined) cookies[name] = value;
+    });
+    return cookies;
+}
+
+function sessionCookieHeaders(value, maxAgeSeconds) {
+    const expires = new Date(maxAgeSeconds > 0 ? Date.now() + maxAgeSeconds * 1000 : 0).toUTCString();
+    return SESSION_COOKIE_PATHS.map(cookiePath => (
+        `${SESSION_COOKIE}=${value}; Path=${cookiePath}; Max-Age=${maxAgeSeconds}; Expires=${expires}; HttpOnly; Secure; SameSite=Strict`
+    ));
+}
+
+function createLoginLimiter({ now = () => Date.now(), maxFailures = 5, blockMs = 15 * 60 * 1000 } = {}) {
+    const attempts = new Map();
+
+    function prune(current) {
+        if (attempts.size < 1000) return;
+        for (const [key, state] of attempts) {
+            if (state.blockedUntil <= current) attempts.delete(key);
+        }
+    }
+
+    return {
+        allowed(key) {
+            const state = attempts.get(key);
+            return !state || state.blockedUntil <= now();
+        },
+        fail(key) {
+            const current = now();
+            prune(current);
+            const previous = attempts.get(key);
+            const inWindow = previous && current - previous.firstAt < blockMs;
+            const failures = inWindow ? previous.failures + 1 : 1;
+            attempts.set(key, {
+                failures,
+                firstAt: inWindow ? previous.firstAt : current,
+                blockedUntil: failures >= maxFailures ? current + blockMs : current,
+            });
+        },
+        success(key) {
+            attempts.delete(key);
+        },
+    };
+}
+
+function clientIdentity(req) {
+    const forwarded = String(req.headers['x-real-ip'] || '').trim();
+    return (forwarded && forwarded.length <= 64) ? forwarded : String(req.socket.remoteAddress || 'unknown');
+}
+
+async function servePublic(res, filename, cacheControl = 'no-cache') {
+    const filePath = path.join(PUBLIC_DIR, filename);
+    const extension = path.extname(filePath);
     try {
-        const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
-        const separator = decoded.indexOf(':');
-        if (separator < 0) return null;
-        return {
-            username: decoded.slice(0, separator),
-            password: decoded.slice(separator + 1),
-        };
-    } catch (_) {
-        return null;
+        const content = await fsp.readFile(filePath);
+        res.writeHead(200, {
+            'Content-Type': MIME_TYPES[extension] || 'application/octet-stream',
+            'Content-Length': content.length,
+            'Cache-Control': cacheControl,
+        });
+        res.end(content);
+    } catch (error) {
+        if (error.code === 'ENOENT') return json(res, 404, { error: 'Not found' });
+        throw error;
     }
 }
 
@@ -222,6 +310,14 @@ function createLogServer(options = {}) {
     const token = options.token || loadOrCreateToken(options.tokenFile || process.env.TOKEN_FILE);
     const resolveLogPath = createPathResolver(logRoot);
     const username = options.username || process.env.LOG_VIEWER_USER || 'logs';
+    const sessionDays = clampInteger(
+        options.sessionDays === undefined ? process.env.SESSION_DAYS : options.sessionDays,
+        DEFAULT_SESSION_DAYS,
+        1,
+        DEFAULT_SESSION_DAYS,
+    );
+    const sessionMaxAgeSeconds = sessionDays * 24 * 60 * 60;
+    const loginLimiter = options.loginLimiter || createLoginLimiter();
     const lotteryRoot = options.lotteryRoot || process.env.LOTTERY_ROOT || DEFAULT_LOTTERY_ROOT;
     const winStateFile = options.winStateFile || process.env.WIN_STATE_FILE
         || path.join(lotteryRoot, 'web_state', 'dismissed-wins.json');
@@ -243,19 +339,43 @@ function createLogServer(options = {}) {
         res.setHeader('Referrer-Policy', 'no-referrer');
         res.setHeader('Content-Security-Policy', 'default-src \'self\'; style-src \'self\'; script-src \'self\'; img-src \'self\' data:; connect-src \'self\'; base-uri \'none\'; frame-ancestors \'self\'');
 
-        const auth = parseBasicAuth(req.headers.authorization);
-        if (!auth || auth.username !== username || !isSameSecret(auth.password, token)) {
-            res.writeHead(401, {
-                'WWW-Authenticate': 'Basic realm="QingLong Logs", charset="UTF-8"',
-                'Content-Type': 'text/plain; charset=utf-8',
-                'Cache-Control': 'no-store',
-            });
-            res.end('需要日志查看器凭据');
-            return;
-        }
-
         try {
             const url = new URL(req.url, 'http://localhost');
+            const cookies = parseCookies(req.headers.cookie);
+            const authenticated = validSessionValue(cookies[SESSION_COOKIE], token);
+
+            if (req.method === 'POST' && url.pathname === '/api/login') {
+                const identity = clientIdentity(req);
+                if (!loginLimiter.allowed(identity)) {
+                    return json(res, 429, { error: '登录失败次数过多，请 15 分钟后重试' });
+                }
+                const body = await readJsonBody(req);
+                if (body.username !== username || !isSameSecret(body.password, token)) {
+                    loginLimiter.fail(identity);
+                    return json(res, 401, { error: '用户名或密码错误' });
+                }
+                loginLimiter.success(identity);
+                const expiresAt = Date.now() + sessionMaxAgeSeconds * 1000;
+                const session = createSessionValue(token, expiresAt);
+                res.setHeader('Set-Cookie', sessionCookieHeaders(session, sessionMaxAgeSeconds));
+                return json(res, 200, { ok: true, expiresAt });
+            }
+
+            if (req.method === 'POST' && url.pathname === '/api/logout') {
+                res.setHeader('Set-Cookie', sessionCookieHeaders('', 0));
+                return json(res, 200, { ok: true });
+            }
+
+            if (req.method === 'GET' && ['/login.html', '/login.js', '/styles.css'].includes(url.pathname)) {
+                return servePublic(res, path.basename(url.pathname), url.pathname === '/styles.css' ? 'public, max-age=300' : 'no-cache');
+            }
+
+            if (!authenticated) {
+                if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+                    return servePublic(res, 'login.html');
+                }
+                return json(res, 401, { error: '登录已失效，请重新登录' });
+            }
 
             if (req.method === 'GET' && url.pathname === '/health') {
                 return json(res, 200, { ok: true, responseMs: Date.now() - startedAt });
@@ -390,20 +510,14 @@ function createLogServer(options = {}) {
             }
 
             if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-                const content = await fsp.readFile(path.join(PUBLIC_DIR, 'index.html'));
-                res.writeHead(200, { 'Content-Type': MIME_TYPES['.html'], 'Content-Length': content.length, 'Cache-Control': 'no-cache' });
-                res.end(content);
-                return;
+                return servePublic(res, 'index.html');
             }
 
             if (req.method === 'GET' && /^\/[a-zA-Z0-9._-]+$/.test(url.pathname)) {
                 const filePath = path.join(PUBLIC_DIR, path.basename(url.pathname));
                 const extension = path.extname(filePath);
                 if (!MIME_TYPES[extension]) return json(res, 404, { error: 'Not found' });
-                const content = await fsp.readFile(filePath);
-                res.writeHead(200, { 'Content-Type': MIME_TYPES[extension], 'Content-Length': content.length, 'Cache-Control': 'public, max-age=300' });
-                res.end(content);
-                return;
+                return servePublic(res, path.basename(filePath), 'public, max-age=300');
             }
 
             return json(res, 404, { error: 'Not found' });
@@ -425,9 +539,14 @@ if (require.main === module) {
 }
 
 module.exports = {
+    createLoginLimiter,
     createLogServer,
     createPathResolver,
+    createSessionValue,
     loadOrCreateToken,
+    parseCookies,
     readJsonBody,
     readChunk,
+    sessionCookieHeaders,
+    validSessionValue,
 };

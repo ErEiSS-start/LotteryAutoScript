@@ -63,6 +63,7 @@ const elements = {
   pendingCount: $('pendingCount'),
   dismissedCount: $('dismissedCount'),
   winsList: $('winsList'),
+  logoutViewer: $('logoutViewer'),
 };
 
 elements.chunkSize.value = String(state.chunkSize);
@@ -102,6 +103,7 @@ async function api(endpoint, parameters = {}) {
   });
   const response = await fetch(url, { cache: 'no-store' });
   const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+  if (response.status === 401) window.location.reload();
   if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
   return payload;
 }
@@ -118,6 +120,7 @@ async function apiPost(endpoint, body) {
     body: JSON.stringify(body),
   });
   const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+  if (response.status === 401) window.location.reload();
   if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
   return payload;
 }
@@ -573,6 +576,17 @@ document.querySelectorAll('.quick-folders button').forEach(button => {
 elements.showWins.addEventListener('click', showWinWorkspace);
 elements.backToLogs.addEventListener('click', showLogWorkspace);
 elements.refreshWins.addEventListener('click', () => loadWins());
+elements.logoutViewer.addEventListener('click', async () => {
+  if (!window.confirm('确定退出日志查看器？下次访问需要重新登录。')) return;
+  elements.logoutViewer.disabled = true;
+  try {
+    await apiPost('logout', {});
+    window.location.reload();
+  } catch (error) {
+    toast(`退出失败：${error.message}`, 'error');
+    elements.logoutViewer.disabled = false;
+  }
+});
 document.querySelectorAll('[data-win-status]').forEach(button => {
   button.addEventListener('click', async () => {
     state.winStatus = button.dataset.winStatus;
