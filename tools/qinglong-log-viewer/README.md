@@ -36,4 +36,9 @@ VIEWER_INSTANCE=主服务器
 PEER_VIEWER_URL=https://qinglong2.example.com/log-viewer/
 ```
 
+如果希望浏览器只输入一次密码，可把副服务器通过主域名的另一条路径反向代理，
+参考 `deploy/nginx-single-login-location.conf`，并把主服务器的 `PEER_VIEWER_URL`
+指向同域地址（例如 `https://qinglong.example.com/log-viewer-2/`）。浏览器访问副服务器
+原域名时仍会按独立站点要求认证。
+
 青龙升级或容器重建不会覆盖本服务，因为程序和 systemd 单元均位于容器外。
