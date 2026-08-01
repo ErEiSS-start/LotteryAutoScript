@@ -347,6 +347,7 @@ function createLogServer(options = {}) {
         options.procRoot || process.env.PROC_ROOT || DEFAULT_PROC_ROOT,
         options.runtimeCacheMs === undefined ? 2000 : options.runtimeCacheMs,
     );
+    const onSearchAbort = typeof options.onSearchAbort === 'function' ? options.onSearchAbort : () => {};
 
     return http.createServer(async (req, res) => {
         const startedAt = Date.now();
@@ -520,24 +521,52 @@ function createLogServer(options = {}) {
                 const needle = caseSensitive ? query : query.toLocaleLowerCase();
                 const stream = fs.createReadStream(file.absolute, { encoding: 'utf8', highWaterMark: 256 * 1024 });
                 const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+                let clientClosed = false;
+                let searchFinished = false;
+                const abortSearch = () => {
+                    if (searchFinished || clientClosed) return;
+                    clientClosed = true;
+                    lines.close();
+                    stream.destroy();
+                    try {
+                        onSearchAbort(file.relative);
+                    } catch (error) {
+                        console.error('搜索取消回调失败', error);
+                    }
+                };
+                req.once('aborted', abortSearch);
+                res.once('close', abortSearch);
+                if (req.aborted || res.destroyed) abortSearch();
                 const matches = [];
                 let lineNumber = 0;
                 let byteOffset = 0;
-                for await (const line of lines) {
-                    lineNumber += 1;
-                    const haystack = caseSensitive ? line : line.toLocaleLowerCase();
-                    if (haystack.includes(needle)) {
-                        matches.push({
-                            line: lineNumber,
-                            offset: byteOffset,
-                            text: line.replace(ANSI_PATTERN, '').slice(0, 1600),
-                        });
-                        if (matches.length >= resultLimit) {
-                            break;
+                try {
+                    for await (const line of lines) {
+                        if (clientClosed) break;
+                        lineNumber += 1;
+                        const haystack = caseSensitive ? line : line.toLocaleLowerCase();
+                        if (haystack.includes(needle)) {
+                            matches.push({
+                                line: lineNumber,
+                                offset: byteOffset,
+                                text: line.replace(ANSI_PATTERN, '').slice(0, 1600),
+                            });
+                            if (matches.length >= resultLimit) {
+                                break;
+                            }
                         }
+                        byteOffset += Buffer.byteLength(line, 'utf8') + 1;
                     }
-                    byteOffset += Buffer.byteLength(line, 'utf8') + 1;
+                } catch (error) {
+                    if (!clientClosed) throw error;
+                } finally {
+                    searchFinished = true;
+                    req.removeListener('aborted', abortSearch);
+                    res.removeListener('close', abortSearch);
+                    lines.close();
+                    stream.destroy();
                 }
+                if (clientClosed) return;
                 return json(res, 200, {
                     path: file.relative,
                     query,

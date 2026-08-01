@@ -74,6 +74,26 @@ button:disabled, .button-link.disabled {
   margin: 0;
 }
 
+.sync-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.sync-status::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+}
+
+.sync-status.syncing { color: var(--accent); }
+.sync-status.success { color: var(--accent); }
+.sync-status.error { color: var(--error); }
+
 input, select {
   min-height: 36px;
   border-radius: 8px;

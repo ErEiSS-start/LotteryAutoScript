@@ -8,6 +8,7 @@ const state = {
   totalEntries: 0,
   listOffset: 0,
   selectedFile: '',
+  renderedFile: '',
   fileSize: 0,
   chunkStart: 0,
   chunkEnd: 0,
@@ -15,7 +16,13 @@ const state = {
   follow: localStorage.getItem('qlv_follow') === '1',
   followTimer: null,
   runtimeTimer: null,
-  directoryRequestId: 0,
+  requestSequence: 0,
+  requests: {
+    directory: null,
+    chunk: null,
+    search: null,
+    follow: null,
+  },
   selectedRunning: false,
   loadingChunk: false,
 };
@@ -45,9 +52,12 @@ const elements = {
   searchResults: $('searchResults'),
   rangeStatus: $('rangeStatus'),
   requestStatus: $('requestStatus'),
+  syncStatus: $('syncStatus'),
   logViewport: $('logViewport'),
   logContent: $('logContent'),
   emptyState: $('emptyState'),
+  emptyTitle: $('emptyTitle'),
+  emptyHint: $('emptyHint'),
   toast: $('toast'),
   winnerViewerLink: $('winnerViewerLink'),
   logoutViewer: $('logoutViewer'),
@@ -83,12 +93,55 @@ function toast(message, type = '') {
   toastTimer = setTimeout(() => { elements.toast.className = 'toast'; }, 2800);
 }
 
-async function api(endpoint, parameters = {}) {
+function isAbortError(error) {
+  return error && error.name === 'AbortError';
+}
+
+function beginRequest(kind, { replace = true } = {}) {
+  const previous = state.requests[kind];
+  if (previous && !replace) return null;
+  if (previous) previous.controller.abort();
+  const request = {
+    id: ++state.requestSequence,
+    controller: new AbortController(),
+  };
+  state.requests[kind] = request;
+  return request;
+}
+
+function isCurrentRequest(kind, request) {
+  return state.requests[kind] === request;
+}
+
+function finishRequest(kind, request) {
+  if (isCurrentRequest(kind, request)) state.requests[kind] = null;
+}
+
+function cancelRequest(kind) {
+  const request = state.requests[kind];
+  if (request) request.controller.abort();
+  state.requests[kind] = null;
+}
+
+function setSyncStatus(mode, text) {
+  elements.syncStatus.className = `sync-status ${mode}`;
+  elements.syncStatus.textContent = text;
+}
+
+function markSyncSuccess() {
+  setSyncStatus('success', `已同步 ${formatTime(Date.now())}`);
+}
+
+function markSyncError() {
+  setSyncStatus('error', '连接中断，当前显示为缓存内容');
+}
+
+async function api(endpoint, parameters = {}, options = {}) {
   const url = new URL(`./api/${endpoint}`, window.location.href);
   Object.entries(parameters).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value);
   });
-  const response = await fetch(url, { cache: 'no-store' });
+  const response = await fetch(url, { cache: 'no-store', signal: options.signal });
   const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
   if (response.status === 401) window.location.reload();
   if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
@@ -198,30 +251,38 @@ function updateSelectedRuntime() {
 }
 
 async function loadDirectory(directory, append = false, options = {}) {
-  const requestId = ++state.directoryRequestId;
+  const request = beginRequest('directory', { replace: !options.silent });
+  if (!request) return false;
   const listScrollTop = elements.fileList.scrollTop;
   try {
-    if (!options.silent) elements.requestStatus.textContent = '读取目录…';
+    if (!options.silent) {
+      elements.requestStatus.textContent = '读取目录…';
+      setSyncStatus('syncing', '正在同步');
+    }
     const offset = append ? state.entries.length : 0;
     const limit = append ? 200 : (options.silent ? Math.min(500, Math.max(200, state.entries.length)) : 200);
-    const payload = await api('list', { path: directory, offset, limit });
-    if (requestId !== state.directoryRequestId) return false;
+    const payload = await api('list', { path: directory, offset, limit }, { signal: request.controller.signal });
+    if (!isCurrentRequest('directory', request)) return false;
     state.directory = payload.path;
     state.totalEntries = payload.total;
     state.entries = append ? [...state.entries, ...payload.entries] : payload.entries;
     renderBreadcrumbs();
     renderFiles();
     updateSelectedRuntime();
+    markSyncSuccess();
     if (options.silent) elements.fileList.scrollTop = listScrollTop;
     else elements.requestStatus.textContent = `${payload.total} 项`;
     return true;
   } catch (error) {
-    if (requestId !== state.directoryRequestId) return false;
+    if (!isCurrentRequest('directory', request) || isAbortError(error)) return false;
+    markSyncError();
     if (!options.silent) {
       elements.requestStatus.textContent = '';
       toast(`目录读取失败：${error.message}`, 'error');
     }
     return false;
+  } finally {
+    finishRequest('directory', request);
   }
 }
 
@@ -246,6 +307,14 @@ function renderLog(text) {
   elements.logContent.classList.add('visible');
 }
 
+function showLogPlaceholder(title, hint) {
+  elements.logContent.replaceChildren();
+  elements.logContent.classList.remove('visible');
+  elements.emptyTitle.textContent = title;
+  elements.emptyHint.textContent = hint;
+  elements.emptyState.classList.remove('hidden');
+}
+
 function scrollLogToEnd() {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
@@ -260,7 +329,7 @@ function updateChunkControls() {
   elements.nextChunk.disabled = !hasFile || state.chunkEnd >= state.fileSize || state.loadingChunk;
   elements.latestChunk.disabled = !hasFile || state.loadingChunk;
   elements.logSearch.disabled = !hasFile;
-  elements.searchButton.disabled = !hasFile;
+  elements.searchButton.disabled = !hasFile || Boolean(state.requests.search);
   elements.downloadLog.classList.toggle('disabled', !hasFile);
   elements.downloadLog.setAttribute('aria-disabled', hasFile ? 'false' : 'true');
   elements.rangeStatus.textContent = hasFile
@@ -269,34 +338,52 @@ function updateChunkControls() {
 }
 
 async function loadChunk(offset = null, options = {}) {
-  if (!state.selectedFile || state.loadingChunk) return;
+  if (!state.selectedFile) return false;
+  const filePath = state.selectedFile;
+  const request = beginRequest('chunk');
   state.loadingChunk = true;
   updateChunkControls();
   const started = performance.now();
   elements.requestStatus.textContent = '读取分块…';
+  if (!options.silent) setSyncStatus('syncing', '正在同步');
   try {
     const payload = await api('chunk', {
-      path: state.selectedFile,
+      path: filePath,
       offset,
       limit: state.chunkSize,
-    });
+    }, { signal: request.controller.signal });
+    if (!isCurrentRequest('chunk', request) || state.selectedFile !== filePath) return false;
     state.fileSize = payload.size;
     state.chunkStart = payload.start;
     state.chunkEnd = payload.end;
     renderLog(payload.text || '');
+    state.renderedFile = filePath;
     elements.fileMeta.textContent = `${formatBytes(payload.size)} · 更新于 ${formatTime(payload.mtimeMs)}`;
     elements.requestStatus.textContent = `${Math.round(performance.now() - started)} ms`;
+    markSyncSuccess();
     if (options.scrollToEnd || offset === null) scrollLogToEnd();
+    return true;
   } catch (error) {
+    if (!isCurrentRequest('chunk', request) || isAbortError(error)) return false;
     elements.requestStatus.textContent = '';
+    markSyncError();
+    if (state.renderedFile !== filePath) {
+      showLogPlaceholder('日志读取失败', '网络恢复后重新选择文件或点击“最新”重试。');
+    }
     toast(`日志读取失败：${error.message}`, 'error');
+    return false;
   } finally {
-    state.loadingChunk = false;
-    updateChunkControls();
+    if (isCurrentRequest('chunk', request)) {
+      finishRequest('chunk', request);
+      state.loadingChunk = false;
+      updateChunkControls();
+    }
   }
 }
 
 async function selectFile(entry) {
+  cancelRequest('follow');
+  cancelRequest('search');
   state.selectedFile = entry.path;
   state.selectedRunning = Boolean(entry.running);
   state.fileSize = entry.size;
@@ -304,6 +391,9 @@ async function selectFile(entry) {
   state.chunkEnd = 0;
   elements.fileName.textContent = entry.name;
   elements.fileMeta.textContent = `${formatBytes(entry.size)} · 正在加载末尾`;
+  if (state.renderedFile !== entry.path) {
+    showLogPlaceholder(`正在读取 ${entry.name}`, '旧文件内容已隐藏，等待当前文件返回。');
+  }
   updateSelectedRuntime();
   elements.downloadLog.href = `./api/download?path=${encodeURIComponent(entry.path)}`;
   clearSearchResults();
@@ -315,15 +405,18 @@ async function selectFile(entry) {
 async function searchLog() {
   const query = elements.logSearch.value.trim();
   if (!query || !state.selectedFile) return;
+  const filePath = state.selectedFile;
+  const request = beginRequest('search');
   elements.searchButton.disabled = true;
   elements.searchButton.textContent = '搜索中…';
   try {
     const payload = await api('search', {
-      path: state.selectedFile,
+      path: filePath,
       q: query,
       case: elements.caseSensitive.checked ? '1' : '0',
       limit: 100,
-    });
+    }, { signal: request.controller.signal });
+    if (!isCurrentRequest('search', request) || state.selectedFile !== filePath) return;
     elements.searchPanel.classList.remove('hidden');
     elements.clearSearch.disabled = false;
     elements.searchSummary.textContent = `找到 ${payload.matches.length} 条${payload.limited ? '（已达到显示上限）' : ''} · ${payload.elapsedMs} ms`;
@@ -341,14 +434,21 @@ async function searchLog() {
       elements.searchResults.append(button);
     });
   } catch (error) {
+    if (!isCurrentRequest('search', request) || isAbortError(error)) return;
     toast(`搜索失败：${error.message}`, 'error');
   } finally {
-    elements.searchButton.disabled = false;
-    elements.searchButton.textContent = '搜索';
+    if (isCurrentRequest('search', request)) {
+      finishRequest('search', request);
+      elements.searchButton.disabled = false;
+      elements.searchButton.textContent = '搜索';
+    }
   }
 }
 
 function clearSearchResults() {
+  cancelRequest('search');
+  elements.searchButton.disabled = !state.selectedFile;
+  elements.searchButton.textContent = '搜索';
   elements.searchPanel.classList.add('hidden');
   elements.searchResults.replaceChildren();
   elements.searchSummary.textContent = '';
@@ -357,17 +457,25 @@ function clearSearchResults() {
 
 async function followTick() {
   if (!state.follow || !state.selectedFile || state.loadingChunk) return;
+  const filePath = state.selectedFile;
+  const request = beginRequest('follow', { replace: false });
+  if (!request) return;
   try {
-    const metadata = await api('meta', { path: state.selectedFile });
-    if (metadata.size !== state.fileSize) await loadChunk(null, { scrollToEnd: true });
+    const metadata = await api('meta', { path: filePath }, { signal: request.controller.signal });
+    if (!isCurrentRequest('follow', request) || state.selectedFile !== filePath) return;
+    markSyncSuccess();
+    if (metadata.size !== state.fileSize) await loadChunk(null, { scrollToEnd: true, silent: true });
   } catch (error) {
-    toast(`自动追踪暂停：${error.message}`, 'error');
+    if (isCurrentRequest('follow', request) && !isAbortError(error)) markSyncError();
+  } finally {
+    finishRequest('follow', request);
   }
 }
 
 function configureFollow() {
   clearInterval(state.followTimer);
   state.followTimer = null;
+  cancelRequest('follow');
   if (state.follow) state.followTimer = setInterval(followTick, 2000);
 }
 
@@ -409,6 +517,9 @@ elements.winnerViewerLink.addEventListener('click', event => {
 });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) loadDirectory(state.directory, false, { silent: true });
+});
+window.addEventListener('pagehide', () => {
+  Object.keys(state.requests).forEach(cancelRequest);
 });
 document.querySelectorAll('.quick-folders button').forEach(button => {
   button.addEventListener('click', async () => {

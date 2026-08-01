@@ -2,6 +2,7 @@
 
 const assert = require('assert');
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const {
@@ -138,6 +139,7 @@ function winAction(baseUrl, action, body, actionHeader = true) {
         path.join(root, 'task', 'large.log'),
         `${'普通日志\n'.repeat(5000)}[Warn] 412 风控\n最后一行\n`,
     );
+    fs.writeFileSync(path.join(root, 'task', 'abort.log'), 'ordinary line\n'.repeat(800000));
     fs.writeFileSync(path.join(outside, 'secret.log'), 'secret');
     fs.symlinkSync(path.join(outside, 'secret.log'), path.join(root, 'escape.log'));
 
@@ -164,6 +166,7 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     addProcess(41002, 'LotteryAutoScript_start');
     addProcess(41003, 'LotteryAutoScript_check');
 
+    let searchAbortCount = 0;
     const server = createLogServer({
         logRoot: root,
         token: 'test-token',
@@ -178,6 +181,7 @@ function winAction(baseUrl, action, body, actionHeader = true) {
         peerWinnerUrl: 'https://viewer.example/winner-reminders-2/',
         logViewerUrl: 'https://viewer.example/log-viewer/',
         profileResolver,
+        onSearchAbort: () => { searchAbortCount += 1; },
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -266,6 +270,22 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     assert.strictEqual(response.status, 200);
     assert.strictEqual(payload.matches.length, 10);
     assert.strictEqual(payload.limited, true);
+
+    await new Promise(resolve => {
+        const aborted = http.request(`${baseUrl}/api/search?path=task%2Fabort.log&q=never-matches`, {
+            headers: { Cookie: sessionCookie },
+        });
+        aborted.on('error', resolve);
+        aborted.on('close', resolve);
+        aborted.end();
+        setTimeout(() => aborted.destroy(), 10);
+    });
+    for (let index = 0; index < 20 && searchAbortCount === 0; index += 1) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.strictEqual(searchAbortCount, 1, '客户端取消搜索后服务端应立即停止读取');
+    response = await request(baseUrl, '/health');
+    assert.strictEqual(response.status, 200, '取消搜索不得影响后续请求');
 
     response = await request(baseUrl, '/api/wins?status=pending');
     payload = await response.json();

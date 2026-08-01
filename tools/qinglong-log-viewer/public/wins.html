@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <title>中奖提醒管理</title>
-  <link rel="stylesheet" href="./styles.css?v=7">
+  <link rel="stylesheet" href="./styles.css?v=8">
 </head>
 <body class="winner-body">
   <main class="winner-page-shell">
@@ -14,7 +14,7 @@
         <div class="brand-mark" aria-hidden="true">奖</div>
         <div>
           <h1>中奖提醒管理</h1>
-          <p><span id="viewerInstance">本服务器</span> · 与日志查看独立运行</p>
+          <p><span id="viewerInstance">本服务器</span> · 与日志查看独立运行 · <span id="winSyncStatus" class="sync-status syncing" role="status">正在同步</span></p>
         </div>
       </div>
       <div class="toolbar-actions">
@@ -38,6 +38,6 @@
     </section>
   </main>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./wins.js?v=2" defer></script>
+  <script src="./wins.js?v=3" defer></script>
 </body>
 </html>

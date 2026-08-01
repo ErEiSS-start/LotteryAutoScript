@@ -1,6 +1,13 @@
 'use strict';
 
-const state = { status: 'pending', records: [] };
+const state = {
+  status: 'pending',
+  renderedStatus: '',
+  records: [],
+  recordsByStatus: { pending: null, dismissed: null },
+  request: null,
+  requestSequence: 0,
+};
 const $ = id => document.getElementById(id);
 const elements = {
   viewerInstance: $('viewerInstance'),
@@ -10,6 +17,7 @@ const elements = {
   logoutViewer: $('logoutViewer'),
   pendingCount: $('pendingCount'),
   dismissedCount: $('dismissedCount'),
+  winSyncStatus: $('winSyncStatus'),
   winsWarnings: $('winsWarnings'),
   winsList: $('winsList'),
   toast: $('toast'),
@@ -23,12 +31,50 @@ function toast(message, type = '') {
   toastTimer = setTimeout(() => { elements.toast.className = 'toast'; }, 2800);
 }
 
-async function api(endpoint, parameters = {}) {
+function isAbortError(error) {
+  return error && error.name === 'AbortError';
+}
+
+function beginWinRequest({ replace = true } = {}) {
+  if (state.request && !replace) return null;
+  if (state.request) state.request.controller.abort();
+  const request = {
+    id: ++state.requestSequence,
+    controller: new AbortController(),
+  };
+  state.request = request;
+  return request;
+}
+
+function isCurrentRequest(request) {
+  return state.request === request;
+}
+
+function finishWinRequest(request) {
+  if (isCurrentRequest(request)) state.request = null;
+}
+
+function setSyncStatus(mode, text) {
+  elements.winSyncStatus.className = `sync-status ${mode}`;
+  elements.winSyncStatus.textContent = text;
+}
+
+function markSyncSuccess() {
+  setSyncStatus('success', `已同步 ${new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).format(new Date())}`);
+}
+
+function markSyncError() {
+  setSyncStatus('error', '连接中断，当前显示为缓存内容');
+}
+
+async function api(endpoint, parameters = {}, options = {}) {
   const url = new URL(`./api/${endpoint}`, window.location.href);
   Object.entries(parameters).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value);
   });
-  const response = await fetch(url, { cache: 'no-store' });
+  const response = await fetch(url, { cache: 'no-store', signal: options.signal });
   const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
   if (response.status === 401) window.location.reload();
   if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
@@ -92,6 +138,26 @@ function actionLink(label, href) {
   link.rel = 'noopener';
   link.textContent = label;
   return link;
+}
+
+function renderLoading() {
+  const loading = document.createElement('div');
+  loading.className = 'empty-state';
+  const title = document.createElement('strong');
+  title.textContent = '正在读取中奖提醒…';
+  loading.append(title);
+  elements.winsList.replaceChildren(loading);
+}
+
+function renderUnavailable() {
+  const unavailable = document.createElement('div');
+  unavailable.className = 'empty-state';
+  const title = document.createElement('strong');
+  title.textContent = '当前筛选暂时无法同步';
+  const hint = document.createElement('span');
+  hint.textContent = '网络恢复后会自动重试，也可以点击刷新。';
+  unavailable.append(title, hint);
+  elements.winsList.replaceChildren(unavailable);
 }
 
 function render() {
@@ -158,6 +224,8 @@ function render() {
           accountUid: record.accountUid,
           recordId: record.recordId,
         });
+        state.recordsByStatus.pending = null;
+        state.recordsByStatus.dismissed = null;
         toast(dismissing ? '已取消后续重复提醒' : '已恢复提醒', 'success');
         await loadWins();
       } catch (error) {
@@ -172,10 +240,31 @@ function render() {
 }
 
 async function loadWins(options = {}) {
+  const request = beginWinRequest({ replace: !options.silent });
+  if (!request) return false;
+  const requestedStatus = state.status;
   try {
-    if (!options.silent) elements.winsList.setAttribute('aria-busy', 'true');
-    const payload = await api('wins', { status: state.status });
+    if (!options.silent) {
+      elements.winsList.setAttribute('aria-busy', 'true');
+      setSyncStatus('syncing', '正在同步');
+    }
+    if (state.renderedStatus !== requestedStatus) {
+      const cachedRecords = state.recordsByStatus[requestedStatus];
+      state.renderedStatus = requestedStatus;
+      if (Array.isArray(cachedRecords)) {
+        state.records = cachedRecords;
+        render();
+      } else {
+        state.records = [];
+        renderLoading();
+      }
+    }
+    elements.refreshWins.disabled = true;
+    const payload = await api('wins', { status: requestedStatus }, { signal: request.controller.signal });
+    if (!isCurrentRequest(request) || state.status !== requestedStatus) return false;
     state.records = payload.records;
+    state.recordsByStatus[requestedStatus] = payload.records;
+    state.renderedStatus = requestedStatus;
     elements.viewerInstance.textContent = payload.instance || '本服务器';
     elements.pendingCount.textContent = String(payload.counts.pending);
     elements.dismissedCount.textContent = String(payload.counts.dismissed);
@@ -198,10 +287,20 @@ async function loadWins(options = {}) {
       }
     }
     render();
+    markSyncSuccess();
+    return true;
   } catch (error) {
+    if (!isCurrentRequest(request) || isAbortError(error)) return false;
+    markSyncError();
+    if (!Array.isArray(state.recordsByStatus[requestedStatus])) renderUnavailable();
     if (!options.silent) toast(`中奖提醒读取失败：${error.message}`, 'error');
+    return false;
   } finally {
-    elements.winsList.removeAttribute('aria-busy');
+    if (isCurrentRequest(request)) {
+      finishWinRequest(request);
+      elements.winsList.removeAttribute('aria-busy');
+      elements.refreshWins.disabled = false;
+    }
   }
 }
 
@@ -226,6 +325,10 @@ document.querySelectorAll('[data-win-status]').forEach(button => {
 });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) loadWins({ silent: true });
+});
+window.addEventListener('pagehide', () => {
+  if (state.request) state.request.controller.abort();
+  state.request = null;
 });
 
 loadWins();

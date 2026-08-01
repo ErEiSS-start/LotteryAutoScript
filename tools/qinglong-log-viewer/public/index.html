@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <title>青龙日志 · 流畅查看器</title>
-  <link rel="stylesheet" href="./styles.css?v=7">
+  <link rel="stylesheet" href="./styles.css?v=8">
 </head>
 <body>
   <div class="app-shell">
@@ -89,12 +89,13 @@
         <div class="log-status">
           <span id="rangeStatus">等待选择文件</span>
           <span id="requestStatus"></span>
+          <span id="syncStatus" class="sync-status syncing" role="status">正在同步</span>
         </div>
         <div id="logViewport" class="log-viewport" tabindex="0">
           <div id="emptyState" class="empty-state">
             <div class="empty-icon">⌁</div>
-            <strong>从左侧选择一个日志</strong>
-            <span>默认只读取文件末尾 128 KB，大文件也能立即打开。</span>
+            <strong id="emptyTitle">从左侧选择一个日志</strong>
+            <span id="emptyHint">默认只读取文件末尾 128 KB，大文件也能立即打开。</span>
           </div>
           <pre id="logContent" class="log-content" aria-live="polite"></pre>
         </div>
@@ -103,6 +104,6 @@
 
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=7" defer></script>
+  <script src="./app.js?v=8" defer></script>
 </body>
 </html>
