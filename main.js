@@ -10,6 +10,7 @@ const {
 } = require('./lib/utils');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const request = require('https');
+const { writeLocalAccountRegistry } = require('./lib/helper/local_account_registry');
 const metainfo = [
     '  _           _   _                   _____           _       _   ',
     ' | |         | | | |                 / ____|         (_)     | |  ',
@@ -41,6 +42,15 @@ function setAccountEnv(account) {
         } else {
             process.env[key] = String(account[key]);
         }
+    }
+}
+
+function persistLocalAccountRegistry(accounts) {
+    try {
+        const registry = writeLocalAccountRegistry(accounts);
+        log.info('本机帐号清单', `已登记${registry.length}个帐号UID（不保存Cookie）`);
+    } catch (error) {
+        log.warn('本机帐号清单', `写入失败，中奖面板将使用兼容模式: ${error.message}`);
     }
 }
 
@@ -408,6 +418,14 @@ function initEnv() {
         env.init();
         log.init();
         log.info('环境变量初始化', '成功加载env.js文件');
+        let activeAccounts = multiple_account;
+        if (!String(process.env.ENABLE_MULTIPLE_ACCOUNT || '').match(/^(1|true)$/i)) {
+            activeAccounts = [{
+                COOKIE: process.env.COOKIE || '',
+                NUMBER: process.env.NUMBER || 1,
+            }];
+        }
+        persistLocalAccountRegistry(activeAccounts);
         const importSummary = env.get_account_import_summary();
         if (importSummary.enabled) {
             log.info(
@@ -430,6 +448,17 @@ function initEnv() {
     } else if (hasEnv('COOKIE') || hasEnv('MULTIPLE_ACCOUNT_PARM')) {
         log.init();
         log.info('环境变量初始化', '成功从环境变量中读取COOKIE设置');
+        let activeAccounts = [{ COOKIE: process.env.COOKIE || '', NUMBER: process.env.NUMBER || 1 }];
+        if (process.env.MULTIPLE_ACCOUNT_PARM) {
+            try {
+                const parsed = JSON.parse(process.env.MULTIPLE_ACCOUNT_PARM);
+                if (Array.isArray(parsed) && parsed.length) activeAccounts = parsed;
+            } catch (error) {
+                log.warn('本机帐号清单', `MULTIPLE_ACCOUNT_PARM解析失败，保留现有清单: ${error.message}`);
+                return false;
+            }
+        }
+        persistLocalAccountRegistry(activeAccounts);
     } else {
         log.init();
         log.error('环境变量初始化', '未在当前目录下找到env.js文件或者在环境变量中设置所需参数');

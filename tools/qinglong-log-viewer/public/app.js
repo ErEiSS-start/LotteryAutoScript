@@ -404,6 +404,9 @@ elements.clearSearch.addEventListener('click', () => {
 elements.downloadLog.addEventListener('click', event => {
   if (!state.selectedFile) event.preventDefault();
 });
+elements.winnerViewerLink.addEventListener('click', event => {
+  if (elements.winnerViewerLink.classList.contains('disabled')) event.preventDefault();
+});
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) loadDirectory(state.directory, false, { silent: true });
 });
@@ -431,9 +434,15 @@ configureRuntimePolling();
   try {
     const config = await api('config');
     if (config.winnerViewerUrl) elements.winnerViewerLink.href = config.winnerViewerUrl;
-    else elements.winnerViewerLink.classList.add('disabled');
+    else {
+      elements.winnerViewerLink.classList.add('disabled');
+      elements.winnerViewerLink.removeAttribute('href');
+      elements.winnerViewerLink.setAttribute('aria-disabled', 'true');
+    }
   } catch (_) {
     elements.winnerViewerLink.classList.add('disabled');
+    elements.winnerViewerLink.removeAttribute('href');
+    elements.winnerViewerLink.setAttribute('aria-disabled', 'true');
   }
   const loaded = await loadDirectory(DEFAULT_DIRECTORY);
   const latest = state.entries.find(entry => entry.type === 'file');

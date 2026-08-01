@@ -10,6 +10,7 @@ const elements = {
   logoutViewer: $('logoutViewer'),
   pendingCount: $('pendingCount'),
   dismissedCount: $('dismissedCount'),
+  winsWarnings: $('winsWarnings'),
   winsList: $('winsList'),
   toast: $('toast'),
 };
@@ -178,6 +179,13 @@ async function loadWins(options = {}) {
     elements.viewerInstance.textContent = payload.instance || '本服务器';
     elements.pendingCount.textContent = String(payload.counts.pending);
     elements.dismissedCount.textContent = String(payload.counts.dismissed);
+    const warnings = Array.isArray(payload.warnings) ? payload.warnings.filter(Boolean) : [];
+    elements.winsWarnings.replaceChildren(...warnings.map(message => {
+      const item = document.createElement('p');
+      item.textContent = message;
+      return item;
+    }));
+    elements.winsWarnings.classList.toggle('hidden', warnings.length === 0);
     for (const [element, href] of [
       [elements.logViewerLink, payload.logViewerUrl],
       [elements.peerWinnerLink, payload.peerWinnerUrl],
@@ -200,8 +208,14 @@ async function loadWins(options = {}) {
 elements.refreshWins.addEventListener('click', () => loadWins());
 elements.logoutViewer.addEventListener('click', async () => {
   if (!window.confirm('确定退出？下次访问日志或中奖管理均需要重新登录。')) return;
-  await apiPost('logout', {});
-  window.location.reload();
+  elements.logoutViewer.disabled = true;
+  try {
+    await apiPost('logout', {});
+    window.location.reload();
+  } catch (error) {
+    toast(`退出失败：${error.message}`, 'error');
+    elements.logoutViewer.disabled = false;
+  }
 });
 document.querySelectorAll('[data-win-status]').forEach(button => {
   button.addEventListener('click', async () => {

@@ -14,6 +14,7 @@ Environment=LOG_ROOT=/opt/1panel/apps/qinglong/qinglong/data/log
 Environment=TOKEN_FILE=/var/lib/qinglong-log-viewer/token
 Environment=LOTTERY_ROOT=/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript
 Environment=WIN_STATE_FILE=/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript/web_state/dismissed-wins.json
+Environment=ACCOUNT_REGISTRY_FILE=/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript/web_state/local-accounts.json
 EnvironmentFile=-/etc/qinglong-log-viewer.env
 ExecStart=/usr/bin/node /opt/qinglong-log-viewer/server.js
 Restart=on-failure

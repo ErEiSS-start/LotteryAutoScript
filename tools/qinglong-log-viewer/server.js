@@ -327,9 +327,12 @@ function createLogServer(options = {}) {
     const lotteryRoot = options.lotteryRoot || process.env.LOTTERY_ROOT || DEFAULT_LOTTERY_ROOT;
     const winStateFile = options.winStateFile || process.env.WIN_STATE_FILE
         || path.join(lotteryRoot, 'web_state', 'dismissed-wins.json');
+    const accountRegistryFile = options.accountRegistryFile || process.env.ACCOUNT_REGISTRY_FILE
+        || path.join(lotteryRoot, 'web_state', 'local-accounts.json');
     const winReminders = options.winReminders || createWinReminderStore({
         lotteryRoot,
         stateFile: winStateFile,
+        accountRegistryFile,
     });
     const viewerInstance = options.viewerInstance || process.env.VIEWER_INSTANCE || '本服务器';
     const peerViewerUrl = options.peerViewerUrl || process.env.PEER_VIEWER_URL || '';
@@ -347,6 +350,7 @@ function createLogServer(options = {}) {
 
     return http.createServer(async (req, res) => {
         const startedAt = Date.now();
+        let requestPath = '';
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('X-Frame-Options', 'SAMEORIGIN');
         res.setHeader('Referrer-Policy', 'no-referrer');
@@ -354,6 +358,7 @@ function createLogServer(options = {}) {
 
         try {
             const url = new URL(req.url, 'http://localhost');
+            requestPath = url.pathname;
             const cookies = parseCookies(req.headers.cookie);
             const authenticated = validSessionValue(cookies[SESSION_COOKIE], token);
 
@@ -408,10 +413,17 @@ function createLogServer(options = {}) {
 
             if (req.method === 'GET' && url.pathname === '/api/wins') {
                 const result = await winReminders.list(url.searchParams.get('status') || 'pending');
-                const profileNames = await profileResolver.resolveMany(result.records.flatMap(record => [
+                const profileUids = result.records.flatMap(record => [
                     record.accountUid,
                     record.senderUid || record.talkerId,
-                ]));
+                ]);
+                const profileNames = typeof profileResolver.cachedMany === 'function'
+                    ? await profileResolver.cachedMany(profileUids)
+                    : await profileResolver.resolveMany(profileUids);
+                if (typeof profileResolver.refreshMany === 'function') {
+                    profileResolver.refreshMany(profileUids, { limit: 8, concurrency: 4 })
+                        .catch(error => console.error('昵称后台刷新失败', error));
+                }
                 return json(res, 200, {
                     instance: viewerInstance,
                     peerViewerUrl,
@@ -419,6 +431,7 @@ function createLogServer(options = {}) {
                     peerWinnerUrl,
                     logViewerUrl,
                     counts: result.counts,
+                    warnings: result.warnings || [],
                     records: result.records.map(record => ({
                         ...record,
                         accountName: record.accountName || profileNames[record.accountUid] || '',
@@ -562,7 +575,10 @@ function createLogServer(options = {}) {
         } catch (error) {
             const status = error.statusCode || (error.code === 'ENOENT' ? 404 : 500);
             if (status >= 500) console.error(error);
-            return json(res, status, { error: status >= 500 ? '服务器读取日志失败' : error.message });
+            const serverMessage = requestPath.startsWith('/api/wins')
+                ? '中奖记录处理失败'
+                : '服务器读取日志失败';
+            return json(res, status, { error: status >= 500 ? serverMessage : error.message });
         }
     });
 }

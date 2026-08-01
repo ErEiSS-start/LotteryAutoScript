@@ -55,7 +55,9 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     const lotteryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ql-lottery-'));
     const lotteryInfo = path.join(lotteryRoot, 'lottery_info');
     const winStateFile = path.join(lotteryRoot, 'web_state', 'dismissed-wins.json');
+    const accountRegistryFile = path.join(lotteryRoot, 'web_state', 'local-accounts.json');
     fs.mkdirSync(lotteryInfo);
+    fs.mkdirSync(path.dirname(accountRegistryFile));
     let profileRequests = 0;
     const profileResolver = createProfileResolver({
         cacheFile: path.join(lotteryRoot, 'web_state', 'test-profile-cache.json'),
@@ -69,6 +71,28 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     assert.strictEqual(profileRequests, 2);
     resolvedProfiles = await profileResolver.resolveMany(['1090063081', '12076317']);
     assert.strictEqual(profileRequests, 2, '昵称应从长期缓存读取，不应重复访问公开接口');
+    let releaseSlowProfile;
+    const slowProfileResolver = createProfileResolver({
+        cacheFile: path.join(lotteryRoot, 'web_state', 'slow-profile-cache.json'),
+        fetchName: () => new Promise(resolve => { releaseSlowProfile = resolve; }),
+    });
+    assert.deepStrictEqual(await slowProfileResolver.cachedMany(['10001']), {});
+    const slowRefresh = slowProfileResolver.refreshMany(['10001']);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.deepStrictEqual(await slowProfileResolver.cachedMany(['10001']), {}, '后台查询不得阻塞缓存读取');
+    releaseSlowProfile('后台昵称');
+    await slowRefresh;
+    assert.strictEqual((await slowProfileResolver.cachedMany(['10001']))['10001'], '后台昵称');
+    let boundedRequests = 0;
+    const boundedResolver = createProfileResolver({
+        cacheFile: path.join(lotteryRoot, 'web_state', 'bounded-profile-cache.json'),
+        fetchName: async uid => {
+            boundedRequests += 1;
+            return `昵称${uid}`;
+        },
+    });
+    await boundedResolver.refreshMany(Array.from({ length: 20 }, (_, index) => String(20000 + index)));
+    assert.strictEqual(boundedRequests, 8, '每轮后台昵称刷新最多请求8个UID');
     const winRecord = {
         id: '0123456789abcdef01234567',
         accountUid: '1090063081',
@@ -89,6 +113,25 @@ function winAction(baseUrl, action, body, actionHeader = true) {
         accountUid: '1090063081',
         accountNumber: 1,
         records: [winRecord],
+    }));
+    fs.writeFileSync(accountRegistryFile, JSON.stringify({
+        version: 1,
+        updatedAt: Date.now(),
+        accounts: [{ uid: '1090063081', number: 1 }],
+    }));
+    fs.writeFileSync(path.join(lotteryInfo, 'pending_wins_20002.json'), JSON.stringify({
+        version: 1,
+        accountUid: '20002',
+        accountNumber: 2,
+        records: [{ ...winRecord, id: '1123456789abcdef01234567', accountUid: '20002', accountNumber: 2 }],
+    }));
+    fs.writeFileSync(winStateFile, JSON.stringify({
+        version: 1,
+        records: [{
+            accountUid: '99999',
+            recordId: 'abcdef0123456789abcdef01',
+            dismissedAt: Date.now(),
+        }],
     }));
     fs.mkdirSync(path.join(root, 'task'));
     fs.writeFileSync(
@@ -128,6 +171,7 @@ function winAction(baseUrl, action, body, actionHeader = true) {
         runtimeCacheMs: 0,
         lotteryRoot,
         winStateFile,
+        accountRegistryFile,
         viewerInstance: '测试服务器',
         peerViewerUrl: 'https://peer.example/log-viewer/',
         winnerViewerUrl: 'https://viewer.example/winner-reminders/',
@@ -229,9 +273,33 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     assert.strictEqual(payload.instance, '测试服务器');
     assert.strictEqual(payload.peerViewerUrl, 'https://peer.example/log-viewer/');
     assert.strictEqual(payload.counts.pending, 1);
+    assert.deepStrictEqual(payload.warnings, []);
+    assert.strictEqual(payload.records.some(record => record.accountUid === '20002'), false, '不得显示非本机帐号记录');
     assert.strictEqual(payload.records[0].content, winRecord.content, '登录后应返回完整私信正文');
     assert.strictEqual(payload.records[0].accountName, '_AQWQA_');
     assert.strictEqual(payload.records[0].senderName, '哔哩哔哩智能机');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(winStateFile, 'utf8')).records, [], '应清理失去对应中奖记录的账本条目');
+
+    fs.writeFileSync(path.join(lotteryInfo, 'pending_wins_30003.json'), '{broken-json');
+    response = await request(baseUrl, '/api/wins?status=pending');
+    payload = await response.json();
+    assert.strictEqual(payload.counts.pending, 1);
+    assert.ok(payload.warnings.some(warning => warning.includes('pending_wins_30003.json')));
+
+    fs.renameSync(accountRegistryFile, `${accountRegistryFile}.bak`);
+    response = await request(baseUrl, '/api/wins?status=pending');
+    payload = await response.json();
+    assert.strictEqual(payload.counts.pending, 2, '帐号清单缺失时应兼容显示历史记录');
+    assert.ok(payload.warnings.some(warning => warning.includes('尚未生成')));
+    fs.renameSync(`${accountRegistryFile}.bak`, accountRegistryFile);
+    const validRegistry = fs.readFileSync(accountRegistryFile, 'utf8');
+    fs.writeFileSync(accountRegistryFile, JSON.stringify({ version: 1, accounts: [] }));
+    response = await request(baseUrl, '/api/wins?status=pending');
+    payload = await response.json();
+    assert.strictEqual(payload.counts.pending, 2, '空的损坏帐号清单不得隐藏中奖记录');
+    assert.ok(payload.warnings.some(warning => warning.includes('没有有效UID')));
+    fs.writeFileSync(accountRegistryFile, validRegistry);
 
     response = await winAction(baseUrl, 'dismiss', {
         accountUid: winRecord.accountUid,
@@ -264,6 +332,14 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     });
     assert.strictEqual(response.status, 200);
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(winStateFile, 'utf8')).records, []);
+
+    fs.writeFileSync(winStateFile, '{broken-ledger');
+    response = await request(baseUrl, '/api/wins?status=pending');
+    payload = await response.json();
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(payload.counts.pending, 1, '账本损坏时应按未取消显示，避免漏报');
+    assert.ok(payload.warnings.some(warning => warning.includes('取消提醒账本读取失败')));
+    fs.writeFileSync(winStateFile, JSON.stringify({ version: 1, records: [] }));
 
     response = await winAction(baseUrl, 'dismiss', {
         accountUid: '../../etc',

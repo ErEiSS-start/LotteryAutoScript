@@ -50,7 +50,12 @@ function fetchProfileName(uid, timeoutMs = 8000) {
     });
 }
 
-function createProfileResolver({ cacheFile, now = () => Date.now(), fetchName = fetchProfileName } = {}) {
+function createProfileResolver({
+    cacheFile,
+    now = () => Date.now(),
+    fetchName = fetchProfileName,
+    logger = console,
+} = {}) {
     let loaded = false;
     let cache = {};
     let writeQueue = Promise.resolve();
@@ -65,7 +70,12 @@ function createProfileResolver({ cacheFile, now = () => Date.now(), fetchName = 
                 ? document.profiles
                 : {};
         } catch (error) {
-            if (error.code !== 'ENOENT') cache = {};
+            if (error.code !== 'ENOENT') {
+                cache = {};
+                if (logger && typeof logger.warn === 'function') {
+                    logger.warn(`昵称缓存读取失败，将在后台重新建立: ${error.message}`);
+                }
+            }
         }
     }
 
@@ -108,13 +118,34 @@ function createProfileResolver({ cacheFile, now = () => Date.now(), fetchName = 
         return operation;
     }
 
-    async function resolveMany(values) {
+    function normalizeUids(values) {
+        return [...new Set((Array.isArray(values) ? values : [])
+            .map(value => String(value || ''))
+            .filter(value => UID_PATTERN.test(value)))].slice(0, 100);
+    }
+
+    async function cachedMany(values) {
         await load();
-        const uids = [...new Set(values.map(value => String(value || '')).filter(value => UID_PATTERN.test(value)))].slice(0, 100);
+        const result = {};
+        for (const uid of normalizeUids(values)) {
+            if (cache[uid] && cache[uid].name) result[uid] = cache[uid].name;
+        }
+        return result;
+    }
+
+    async function refreshMany(values, { limit = 8, concurrency = 4 } = {}) {
+        await load();
+        const current = now();
+        const uids = normalizeUids(values).filter(uid => {
+            const cached = cache[uid];
+            const ttl = cached && cached.name ? POSITIVE_TTL : NEGATIVE_TTL;
+            return !cached || current - Number(cached.updatedAt || 0) >= ttl;
+        }).slice(0, Math.max(0, Number(limit) || 0));
         const before = JSON.stringify(cache);
         const result = {};
-        for (let index = 0; index < uids.length; index += 4) {
-            const group = uids.slice(index, index + 4);
+        const groupSize = Math.max(1, Math.min(8, Number(concurrency) || 4));
+        for (let index = 0; index < uids.length; index += groupSize) {
+            const group = uids.slice(index, index + groupSize);
             const names = await Promise.all(group.map(resolveUid));
             group.forEach((uid, nameIndex) => { result[uid] = names[nameIndex]; });
         }
@@ -122,7 +153,12 @@ function createProfileResolver({ cacheFile, now = () => Date.now(), fetchName = 
         return result;
     }
 
-    return { resolveMany };
+    async function resolveMany(values) {
+        await refreshMany(values, { limit: 100, concurrency: 4 });
+        return cachedMany(values);
+    }
+
+    return { cachedMany, refreshMany, resolveMany };
 }
 
 module.exports = {

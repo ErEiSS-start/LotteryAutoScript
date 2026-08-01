@@ -55,6 +55,25 @@ button:disabled, .button-link.disabled {
   opacity: .42;
 }
 
+.button-link.disabled {
+  pointer-events: none;
+}
+
+.wins-warnings {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 184, 77, .55);
+  border-radius: 10px;
+  color: #ffd28a;
+  background: rgba(255, 184, 77, .08);
+}
+
+.wins-warnings p {
+  margin: 0;
+}
+
 input, select {
   min-height: 36px;
   border-radius: 8px;

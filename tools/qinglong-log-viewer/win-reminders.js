@@ -57,18 +57,49 @@ function normalizeLedger(document) {
     }));
 }
 
-function createWinReminderStore({ lotteryRoot, stateFile, now = () => Date.now() }) {
+function createWinReminderStore({
+    lotteryRoot,
+    stateFile,
+    accountRegistryFile = path.join(lotteryRoot, 'web_state', 'local-accounts.json'),
+    now = () => Date.now(),
+} = {}) {
     const lotteryInfoDirectory = path.join(lotteryRoot, 'lottery_info');
     let writeQueue = Promise.resolve();
+    let lastCompactionAt = 0;
 
-    async function readLedger() {
+    async function readLedger(strict = false) {
         try {
             const document = JSON.parse(await fsp.readFile(stateFile, 'utf8'));
             if (!document || !Array.isArray(document.records)) throw new Error('账本格式无效');
-            return normalizeLedger(document);
+            return { records: normalizeLedger(document), warning: '', valid: true };
         } catch (error) {
-            if (error.code === 'ENOENT') return [];
-            throw Object.assign(new Error(`取消提醒账本读取失败：${error.message}`), { statusCode: 500 });
+            if (error.code === 'ENOENT') return { records: [], warning: '', valid: true };
+            if (strict) {
+                throw Object.assign(new Error(`取消提醒账本读取失败：${error.message}`), { statusCode: 500 });
+            }
+            return {
+                records: [],
+                warning: `取消提醒账本读取失败，本次按未取消显示：${error.message}`,
+                valid: false,
+            };
+        }
+    }
+
+    async function readAccountRegistry() {
+        try {
+            const document = JSON.parse(await fsp.readFile(accountRegistryFile, 'utf8'));
+            if (!document || !Array.isArray(document.accounts)) throw new Error('帐号清单格式无效');
+            const uids = new Set(document.accounts
+                .map(account => String(account && account.uid || ''))
+                .filter(uid => UID_PATTERN.test(uid)));
+            if (!uids.size) throw new Error('帐号清单没有有效UID');
+            return { uids, warnings: [] };
+        } catch (error) {
+            const detail = error.code === 'ENOENT' ? '尚未生成' : error.message;
+            return {
+                uids: null,
+                warnings: [`本机帐号清单${detail}，暂时显示全部历史帐号记录`],
+            };
         }
     }
 
@@ -77,40 +108,87 @@ function createWinReminderStore({ lotteryRoot, stateFile, now = () => Date.now()
         try {
             entries = await fsp.readdir(lotteryInfoDirectory, { withFileTypes: true });
         } catch (error) {
-            if (error.code === 'ENOENT') return [];
+            if (error.code === 'ENOENT') return { records: [], warnings: [], complete: true };
             throw error;
         }
         const files = entries.filter(entry => entry.isFile() && /^pending_wins_(\d+)\.json$/.test(entry.name));
         const groups = await Promise.all(files.map(async entry => {
             const match = entry.name.match(/^pending_wins_(\d+)\.json$/);
             const filePath = path.join(lotteryInfoDirectory, entry.name);
-            const stat = await fsp.lstat(filePath);
-            if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_PENDING_FILE_SIZE) return [];
-            let document;
             try {
-                document = JSON.parse(await fsp.readFile(filePath, 'utf8'));
+                const stat = await fsp.lstat(filePath);
+                if (!stat.isFile() || stat.isSymbolicLink()) return { records: [], warnings: [], complete: true };
+                if (stat.size > MAX_PENDING_FILE_SIZE) {
+                    return {
+                        records: [],
+                        warnings: [`${entry.name} 超过安全读取上限，已跳过`],
+                        complete: false,
+                    };
+                }
+                const document = JSON.parse(await fsp.readFile(filePath, 'utf8'));
+                if (!document || !Array.isArray(document.records)) {
+                    return {
+                        records: [],
+                        warnings: [`${entry.name} 格式无效，已跳过`],
+                        complete: false,
+                    };
+                }
+                return {
+                    records: document.records
+                        .map(record => normalizePendingRecord(record, document, match[1]))
+                        .filter(Boolean),
+                    warnings: [],
+                    complete: true,
+                };
             } catch (error) {
-                if (error instanceof SyntaxError) return [];
-                throw error;
+                return {
+                    records: [],
+                    warnings: [`${entry.name} 读取失败，已保留文件：${error.message}`],
+                    complete: false,
+                };
             }
-            if (!document || !Array.isArray(document.records)) return [];
-            return document.records
-                .map(record => normalizePendingRecord(record, document, match[1]))
-                .filter(Boolean);
         }));
-        return groups.flat().sort((left, right) => (
-            right.messageTimestamp - left.messageTimestamp
-            || right.detectedAt - left.detectedAt
-        ));
+        return {
+            records: groups.flatMap(group => group.records).sort((left, right) => (
+                right.messageTimestamp - left.messageTimestamp
+                || right.detectedAt - left.detectedAt
+            )),
+            warnings: groups.flatMap(group => group.warnings),
+            complete: groups.every(group => group.complete),
+        };
+    }
+
+    function scheduleLedgerCompaction(pendingRecords, ledgerRecords, complete) {
+        const current = now();
+        if (!complete || current - lastCompactionAt < 60 * 60 * 1000) return;
+        const pendingKeys = new Set(pendingRecords.map(record => keyOf(record.accountUid, record.recordId)));
+        if (!ledgerRecords.some(record => !pendingKeys.has(keyOf(record.accountUid, record.recordId)))) {
+            lastCompactionAt = current;
+            return;
+        }
+        lastCompactionAt = current;
+        const operation = writeQueue.then(async () => {
+            const latest = await readLedger(true);
+            const compacted = latest.records.filter(record => pendingKeys.has(keyOf(record.accountUid, record.recordId)));
+            if (compacted.length !== latest.records.length) await writeLedger(compacted);
+        });
+        writeQueue = operation.catch(error => console.error('取消提醒账本清理失败', error));
     }
 
     async function list(status = 'pending') {
         if (!['pending', 'dismissed', 'all'].includes(status)) {
             throw Object.assign(new Error('status 只能是 pending、dismissed 或 all'), { statusCode: 400 });
         }
-        const [pendingRecords, ledger] = await Promise.all([readPendingRecords(), readLedger()]);
-        const dismissed = new Map(ledger.map(record => [keyOf(record.accountUid, record.recordId), record]));
-        const records = pendingRecords.map(record => {
+        const [pendingResult, ledger, registry] = await Promise.all([
+            readPendingRecords(),
+            readLedger(),
+            readAccountRegistry(),
+        ]);
+        const dismissed = new Map(ledger.records.map(record => [keyOf(record.accountUid, record.recordId), record]));
+        const visibleRecords = registry.uids
+            ? pendingResult.records.filter(record => registry.uids.has(record.accountUid))
+            : pendingResult.records;
+        const records = visibleRecords.map(record => {
             const dismissal = dismissed.get(keyOf(record.accountUid, record.recordId));
             return {
                 ...record,
@@ -118,13 +196,16 @@ function createWinReminderStore({ lotteryRoot, stateFile, now = () => Date.now()
                 dismissedAt: dismissal ? dismissal.dismissedAt : 0,
             };
         });
-        return {
+        const result = {
             records: status === 'all' ? records : records.filter(record => record.status === status),
             counts: {
                 pending: records.filter(record => record.status === 'pending').length,
                 dismissed: records.filter(record => record.status === 'dismissed').length,
             },
+            warnings: [...pendingResult.warnings, ...registry.warnings, ...(ledger.warning ? [ledger.warning] : [])],
         };
+        if (ledger.valid) scheduleLedgerCompaction(pendingResult.records, ledger.records, pendingResult.complete);
+        return result;
     }
 
     async function writeLedger(records) {
@@ -151,15 +232,18 @@ function createWinReminderStore({ lotteryRoot, stateFile, now = () => Date.now()
         const normalizedUid = String(accountUid);
         const normalizedId = String(recordId).toLowerCase();
         const operation = writeQueue.then(async () => {
-            const pendingRecords = await readPendingRecords();
-            if (!pendingRecords.some(record => (
+            const [pendingResult, registry] = await Promise.all([readPendingRecords(), readAccountRegistry()]);
+            if (registry.uids && !registry.uids.has(normalizedUid)) {
+                throw Object.assign(new Error('该帐号不属于当前服务器'), { statusCode: 404 });
+            }
+            if (!pendingResult.records.some(record => (
                 record.accountUid === normalizedUid && record.recordId === normalizedId
             ))) {
                 throw Object.assign(new Error('待领取中奖记录不存在或已被帐号回复确认'), { statusCode: 404 });
             }
-            const ledger = await readLedger();
+            const ledger = await readLedger(true);
             const key = keyOf(normalizedUid, normalizedId);
-            const withoutRecord = ledger.filter(record => keyOf(record.accountUid, record.recordId) !== key);
+            const withoutRecord = ledger.records.filter(record => keyOf(record.accountUid, record.recordId) !== key);
             if (dismissed) {
                 withoutRecord.push({
                     accountUid: normalizedUid,

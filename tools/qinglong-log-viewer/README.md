@@ -19,10 +19,11 @@
 - 在窄窗口中固定使用视口高度和内部滚动，避免日志末行与滚动条底部被裁切。
 - 登录后可查看本机完整中奖私信，并手动“取消提醒”或“恢复提醒”。
 - 取消提醒只写入独立的 `web_state/dismissed-wins.json` 账本，不修改、标记已读或删除 B 站私信。
-- 主副服务器分别读取本机帐号数据，并可通过页面按钮跳转到另一台服务器。
+- 主副服务器根据 `web_state/local-accounts.json` 只读取本机启用帐号，并可通过页面按钮跳转到另一台服务器。
 - 日志与中奖管理使用完全独立的页面入口，仍共享同一个签名登录会话。
 - 中奖页显示发信人和中奖账号昵称，并提供中奖账号 B 站主页按钮。
-- 缺失昵称通过不带 Cookie 的公开名片接口补齐，并在 `web_state/profile-cache.json` 缓存 30 天。
+- 缺失昵称通过不带 Cookie 的公开名片接口在后台分批补齐；页面不等待 B 站接口，并在 `web_state/profile-cache.json` 缓存 30 天。
+- 单个中奖文件损坏时保留并跳过该文件，在页面显示明确警告，不影响其他中奖记录。
 
 ## 本机部署参数
 
@@ -33,6 +34,7 @@
 - 凭据文件：`/var/lib/qinglong-log-viewer/token`
 - LotteryAutoScript：`/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript`
 - 取消提醒账本：`LotteryAutoScript/web_state/dismissed-wins.json`
+- 本机帐号清单：`LotteryAutoScript/web_state/local-accounts.json`（仅 UID 和本地序号，不含 Cookie）
 
 主副服务器使用相同登录凭据与签名密钥。实例名称和另一台服务器地址通过
 `/etc/qinglong-log-viewer.env` 配置：
@@ -49,5 +51,10 @@ LOG_VIEWER_URL=https://qinglong.example.com/log-viewer/
 参考 `deploy/nginx-single-login-location.conf`，并把主服务器的 `PEER_VIEWER_URL`
 指向同域地址（例如 `https://qinglong.example.com/log-viewer-2/`）。登录页会同时签发
 适用于 `/log-viewer` 和 `/log-viewer-2` 的同源会话 Cookie。
+
+主服务器转发到副服务器时应直接使用副服务器固定 IPv4，并通过
+`proxy_ssl_name` 保留域名 SNI、开启证书校验，避免 Cloudflare AAAA 解析在无 IPv6
+路由的服务器上造成间歇性 502。`X-QLV-Client-IP` 只应在副服务器 Nginx 确认请求
+来自主服务器固定公网 IP 后写入 `X-Real-IP`，不能直接信任浏览器提供的同名请求头。
 
 青龙升级或容器重建不会覆盖本服务，因为程序和 systemd 单元均位于容器外。

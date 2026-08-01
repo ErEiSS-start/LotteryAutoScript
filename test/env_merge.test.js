@@ -1,10 +1,17 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const {
     buildRayCookieAccounts,
     getCookieUid,
     isValidBiliCookie,
     mergeEnvValues,
 } = require('../lib/data/env');
+const {
+    normalizeAccounts,
+    writeLocalAccountRegistry,
+} = require('../lib/helper/local_account_registry');
 
 assert.deepStrictEqual(
     mergeEnvValues(
@@ -74,3 +81,27 @@ assert.deepStrictEqual(imported.summary.importedVariables, [
 assert.deepStrictEqual(imported.summary.invalidVariables, ['Ray_BiliBiliCookies__3']);
 assert.deepStrictEqual(imported.summary.duplicateVariables, ['Ray_BiliBiliCookies__4']);
 assert.deepStrictEqual(imported.summary.accountNumbers, [1, 3, 8]);
+
+assert.deepStrictEqual(normalizeAccounts(imported.accounts), [
+    { uid: '10001', number: 1 },
+    { uid: '10003', number: 3 },
+    { uid: '10008', number: 8 },
+]);
+const registryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'lottery-accounts-'));
+const registryFile = path.join(registryDirectory, 'local-accounts.json');
+writeLocalAccountRegistry(imported.accounts, { filePath: registryFile, now: () => 1234 });
+const registryText = fs.readFileSync(registryFile, 'utf8');
+const registry = JSON.parse(registryText);
+assert.strictEqual(registry.updatedAt, 1234);
+assert.deepStrictEqual(registry.accounts, [
+    { uid: '10001', number: 1 },
+    { uid: '10003', number: 3 },
+    { uid: '10008', number: 8 },
+]);
+assert.strictEqual(registryText.includes('SESSDATA'), false, '本机帐号清单不得保存Cookie');
+assert.throws(
+    () => writeLocalAccountRegistry([], { filePath: registryFile, now: () => 5678 }),
+    /未找到可登记的有效帐号UID/
+);
+assert.strictEqual(fs.readFileSync(registryFile, 'utf8'), registryText, '帐号配置异常时应保留上一份有效清单');
+fs.rmSync(registryDirectory, { recursive: true, force: true });
