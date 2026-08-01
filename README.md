@@ -395,6 +395,10 @@ buvid3亦可不填 使用随机生成值
   `winner_reminder_interval` 自定义提醒间隔。
 - 当脚本检测到本人在对应 B 站私信会话中发送了回复，会把记录标记为
   `acknowledged` 并停止后续提醒。
+- 可部署仓库内的 `tools/qinglong-log-viewer`，登录后查看完整待领取私信，并手动
+  “取消提醒”或“恢复提醒”。取消提醒只写入独立的
+  `web_state/dismissed-wins.json`，不会标记已读、删除或修改 B 站私信；脚本在每次
+  推送前都会重新读取该账本。
 - `winner_reply_check_size` 控制用于判断本人回复的近期消息数量，B 站接口单次最多
   读取 20 条，默认值为 20。
 

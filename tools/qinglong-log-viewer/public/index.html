@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>青龙日志 · 流畅查看器</title>
+  <link rel="stylesheet" href="./styles.css?v=4">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">QL</div>
+        <div>
+          <h1>青龙日志</h1>
+          <p>LotteryAutoScript 优先</p>
+        </div>
+      </div>
+
+      <div class="quick-folders" aria-label="常用日志目录">
+        <button type="button" data-directory="LotteryAutoScript_start">启动日志</button>
+        <button type="button" data-directory="LotteryAutoScript_check">中奖检查</button>
+        <button type="button" data-directory="">全部日志</button>
+      </div>
+
+      <div class="win-nav">
+        <button id="showWins" type="button">
+          <span>中奖提醒</span>
+          <span id="winBadge" class="win-badge hidden">0</span>
+        </button>
+      </div>
+
+      <nav id="breadcrumbs" class="breadcrumbs" aria-label="当前目录"></nav>
+
+      <div class="file-filter">
+        <input id="fileFilter" type="search" placeholder="筛选当前目录" autocomplete="off">
+        <button id="refreshList" class="icon-button" type="button" title="刷新目录">↻</button>
+      </div>
+
+      <div id="fileList" class="file-list" aria-live="polite"></div>
+      <button id="loadMore" class="load-more hidden" type="button">加载更多</button>
+    </aside>
+
+    <main id="logWorkspace" class="workspace">
+      <header class="toolbar">
+        <div class="file-heading">
+          <div class="file-heading-title">
+            <strong id="fileName">请选择日志文件</strong>
+            <span id="runningBadge" class="running-badge hidden">运行中</span>
+          </div>
+          <span id="fileMeta">不会一次加载整份文件</span>
+        </div>
+
+        <div class="toolbar-actions">
+          <button id="previousChunk" type="button" disabled>上一块</button>
+          <button id="nextChunk" type="button" disabled>下一块</button>
+          <button id="latestChunk" type="button" disabled>最新</button>
+          <label class="select-label">
+            <span>块大小</span>
+            <select id="chunkSize">
+              <option value="65536">64 KB</option>
+              <option value="131072" selected>128 KB</option>
+              <option value="262144">256 KB</option>
+              <option value="524288">512 KB</option>
+            </select>
+          </label>
+          <label class="follow-toggle">
+            <input id="followLog" type="checkbox">
+            <span>自动追踪</span>
+          </label>
+          <a id="downloadLog" class="button-link disabled" href="#" aria-disabled="true">下载</a>
+        </div>
+      </header>
+
+      <section class="search-bar">
+        <input id="logSearch" type="search" placeholder="在当前日志中搜索（服务端流式扫描）" autocomplete="off" disabled>
+        <label class="case-toggle"><input id="caseSensitive" type="checkbox"> 区分大小写</label>
+        <button id="searchButton" type="button" disabled>搜索</button>
+        <button id="clearSearch" class="ghost" type="button" disabled>清除</button>
+      </section>
+
+      <section id="searchPanel" class="search-panel hidden">
+        <div class="search-summary" id="searchSummary"></div>
+        <div id="searchResults" class="search-results"></div>
+      </section>
+
+      <section class="log-card">
+        <div class="log-status">
+          <span id="rangeStatus">等待选择文件</span>
+          <span id="requestStatus"></span>
+        </div>
+        <div id="logViewport" class="log-viewport" tabindex="0">
+          <div id="emptyState" class="empty-state">
+            <div class="empty-icon">⌁</div>
+            <strong>从左侧选择一个日志</strong>
+            <span>默认只读取文件末尾 128 KB，大文件也能立即打开。</span>
+          </div>
+          <pre id="logContent" class="log-content" aria-live="polite"></pre>
+        </div>
+      </section>
+    </main>
+
+    <main id="winsWorkspace" class="workspace wins-workspace hidden">
+      <header class="wins-toolbar">
+        <div>
+          <h2>待领取中奖提醒</h2>
+          <p><span id="viewerInstance">本服务器</span> · 完整私信仅在登录后显示</p>
+        </div>
+        <div class="toolbar-actions">
+          <a id="peerViewer" class="button-link hidden" href="#" target="_blank" rel="noopener">打开另一台服务器</a>
+          <button id="refreshWins" type="button">刷新</button>
+          <button id="backToLogs" type="button">返回日志</button>
+        </div>
+      </header>
+
+      <section class="wins-filter" aria-label="中奖提醒筛选">
+        <button class="active" type="button" data-win-status="pending">待处理 <span id="pendingCount">0</span></button>
+        <button type="button" data-win-status="dismissed">已取消 <span id="dismissedCount">0</span></button>
+        <p>“取消提醒”只停止 PushPlus 重复提醒，不会标记已读、删除或修改 B 站私信。</p>
+      </section>
+
+      <section id="winsList" class="wins-list" aria-live="polite">
+        <div class="empty-state">
+          <strong>正在读取中奖提醒…</strong>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="./app.js?v=4" defer></script>
+</body>
+</html>

@@ -10,6 +10,7 @@ const {
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lottery-pending-wins-'));
 const filePath = path.join(directory, 'pending.json');
+const dismissedFilePath = path.join(directory, 'web_state', 'dismissed-wins.json');
 let now = Date.parse('2026-07-29T00:00:00+08:00');
 const logger = { warn() {} };
 const store = new PendingWinStore({
@@ -18,6 +19,7 @@ const store = new PendingWinStore({
     filePath,
     now: () => now,
     logger,
+    dismissedFilePath,
 });
 
 assert.strictEqual(messageText('{"content":"请填写地址"}'), '请填写地址');
@@ -57,6 +59,25 @@ assert.strictEqual(store.add({
 assert.strictEqual(store.pending().length, 1);
 assert.strictEqual(store.due(2 * 60 * 60 * 1000).length, 1);
 
+fs.mkdirSync(path.dirname(dismissedFilePath), { recursive: true });
+fs.writeFileSync(dismissedFilePath, JSON.stringify({
+    version: 1,
+    records: [{
+        accountUid: '10001',
+        recordId: added.record.id,
+        dismissedAt: now,
+    }],
+}));
+assert.strictEqual(store.pending().length, 0, 'Web 账本中的记录应立即停止提醒');
+assert.strictEqual(store.due(0).length, 0);
+
+fs.writeFileSync(dismissedFilePath, JSON.stringify({ version: 1, records: [] }));
+assert.strictEqual(store.pending().length, 1, '从 Web 账本恢复后应立即重新进入待提醒');
+
+fs.writeFileSync(dismissedFilePath, '{broken');
+assert.strictEqual(store.pending().length, 1, '取消提醒账本损坏时应 fail-open，避免漏报中奖');
+fs.writeFileSync(dismissedFilePath, JSON.stringify({ version: 1, records: [] }));
+
 store.markNotified([added.record.id]);
 now += 60 * 60 * 1000;
 assert.strictEqual(store.due(2 * 60 * 60 * 1000).length, 0);
@@ -69,6 +90,7 @@ const reloaded = new PendingWinStore({
     filePath,
     now: () => now,
     logger,
+    dismissedFilePath,
 });
 assert.strictEqual(reloaded.pending().length, 1, '待领取记录应跨进程保留');
 assert.strictEqual(reloaded.acknowledgeByMessages('20002', [{

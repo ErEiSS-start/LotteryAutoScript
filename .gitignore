@@ -3,6 +3,7 @@ node_modules/
 tests/
 dyids/
 lottery_info/
+web_state/
 lottery_dyids/
 comment_history/
 dist/

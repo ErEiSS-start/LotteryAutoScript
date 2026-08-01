@@ -1,0 +1,37 @@
+[Unit]
+Description=QingLong Log and Winner Reminder Viewer
+After=network.target
+
+[Service]
+Type=simple
+User=qinglong-log-viewer
+Group=qinglong-log-viewer
+WorkingDirectory=/opt/qinglong-log-viewer
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=5799
+Environment=LOG_ROOT=/opt/1panel/apps/qinglong/qinglong/data/log
+Environment=TOKEN_FILE=/var/lib/qinglong-log-viewer/token
+Environment=LOTTERY_ROOT=/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript
+Environment=WIN_STATE_FILE=/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript/web_state/dismissed-wins.json
+EnvironmentFile=-/etc/qinglong-log-viewer.env
+ExecStart=/usr/bin/node /opt/qinglong-log-viewer/server.js
+Restart=on-failure
+RestartSec=3
+StateDirectory=qinglong-log-viewer
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript/web_state
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=192M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
