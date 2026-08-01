@@ -35,6 +35,8 @@ function normalizePendingRecord(record, document, filenameUid) {
         recordId,
         talkerId: String(record.talkerId || ''),
         senderUid: String(record.senderUid || record.talkerId || ''),
+        senderName: String(record.senderName || ''),
+        accountName: String(record.accountName || ''),
         messageSequence: String(record.messageSequence || ''),
         messageTimestamp: Number(record.messageTimestamp || 0),
         content: normalizeContent(record.content),

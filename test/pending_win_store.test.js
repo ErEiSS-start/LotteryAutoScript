@@ -43,12 +43,16 @@ assert.strictEqual(
 const added = store.add({
     talkerId: '20002',
     senderUid: '20002',
+    senderName: '发信用户',
+    accountName: '中奖帐号',
     messageSequence: '10',
     messageTimestamp: 100,
     content: '{"content":"恭喜中奖，请填写地址"}',
     link: 'https://message.bilibili.com/#/whisper/mid20002',
 });
 assert.strictEqual(added.created, true);
+assert.strictEqual(added.record.senderName, '发信用户');
+assert.strictEqual(added.record.accountName, '中奖帐号');
 assert.strictEqual(store.add({
     talkerId: '20002',
     senderUid: '20002',

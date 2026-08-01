@@ -25,10 +25,7 @@
       </div>
 
       <div class="win-nav">
-        <button id="showWins" type="button">
-          <span>中奖提醒</span>
-          <span id="winBadge" class="win-badge hidden">0</span>
-        </button>
+        <a id="winnerViewerLink" class="button-link" href="#">打开中奖管理</a>
       </div>
 
       <nav id="breadcrumbs" class="breadcrumbs" aria-label="当前目录"></nav>
@@ -45,7 +42,7 @@
       </div>
     </aside>
 
-    <main id="logWorkspace" class="workspace">
+    <main class="workspace">
       <header class="toolbar">
         <div class="file-heading">
           <div class="file-heading-title">
@@ -104,33 +101,8 @@
       </section>
     </main>
 
-    <main id="winsWorkspace" class="workspace wins-workspace hidden">
-      <header class="wins-toolbar">
-        <div>
-          <h2>待领取中奖提醒</h2>
-          <p><span id="viewerInstance">本服务器</span> · 完整私信仅在登录后显示</p>
-        </div>
-        <div class="toolbar-actions">
-          <a id="peerViewer" class="button-link hidden" href="#" target="_blank" rel="noopener">打开另一台服务器</a>
-          <button id="refreshWins" type="button">刷新</button>
-          <button id="backToLogs" type="button">返回日志</button>
-        </div>
-      </header>
-
-      <section class="wins-filter" aria-label="中奖提醒筛选">
-        <button class="active" type="button" data-win-status="pending">待处理 <span id="pendingCount">0</span></button>
-        <button type="button" data-win-status="dismissed">已取消 <span id="dismissedCount">0</span></button>
-        <p>“取消提醒”只停止 PushPlus 重复提醒，不会标记已读、删除或修改 B 站私信。</p>
-      </section>
-
-      <section id="winsList" class="wins-list" aria-live="polite">
-        <div class="empty-state">
-          <strong>正在读取中奖提醒…</strong>
-        </div>
-      </section>
-    </main>
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=5" defer></script>
+  <script src="./app.js?v=6" defer></script>
 </body>
 </html>

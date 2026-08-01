@@ -123,15 +123,15 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
 }
 
 .win-nav { padding: 0 14px 12px; }
-.win-nav button {
+.win-nav .button-link {
   display: flex;
   width: 100%;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   border-color: rgba(255, 200, 87, .32);
   color: var(--warn);
 }
-.win-nav button.active { background: rgba(255, 200, 87, .1); border-color: var(--warn); }
+.win-nav .button-link:hover { background: rgba(255, 200, 87, .1); border-color: var(--warn); }
 .win-badge {
   min-width: 23px;
   padding: 2px 7px;
@@ -281,6 +281,27 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
 .wins-workspace {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
+
+.winner-body { min-height: 100vh; min-height: 100dvh; overflow: auto; }
+.winner-page-shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(360px, 1fr);
+  width: min(1180px, 100%);
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: 22px;
+  gap: 12px;
+}
+.winner-page-header {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--panel);
+}
+.winner-heading { display: flex; align-items: center; gap: 12px; }
+.winner-heading h1 { margin: 0; font-size: 20px; }
+.winner-heading p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
 
 .wins-toolbar {
   display: flex;
@@ -500,6 +521,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
   .workspace { height: auto; min-height: 0; padding: 12px; overflow: hidden; }
   .toolbar { align-items: flex-start; flex-direction: column; }
   .wins-toolbar { align-items: flex-start; flex-direction: column; }
+  .winner-page-shell { padding: 12px; }
   .wins-filter { align-items: stretch; flex-wrap: wrap; }
   .wins-filter p { flex-basis: 100%; margin-left: 0; }
   .toolbar-actions { justify-content: flex-start; }

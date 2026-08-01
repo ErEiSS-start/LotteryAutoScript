@@ -20,12 +20,16 @@
 - 登录后可查看本机完整中奖私信，并手动“取消提醒”或“恢复提醒”。
 - 取消提醒只写入独立的 `web_state/dismissed-wins.json` 账本，不修改、标记已读或删除 B 站私信。
 - 主副服务器分别读取本机帐号数据，并可通过页面按钮跳转到另一台服务器。
+- 日志与中奖管理使用完全独立的页面入口，仍共享同一个签名登录会话。
+- 中奖页显示发信人和中奖账号昵称，并提供中奖账号 B 站主页按钮。
+- 缺失昵称通过不带 Cookie 的公开名片接口补齐，并在 `web_state/profile-cache.json` 缓存 30 天。
 
 ## 本机部署参数
 
 - 日志目录：`/opt/1panel/apps/qinglong/qinglong/data/log`
 - 监听地址：`127.0.0.1:5799`
 - 外部路径：`https://qinglong.ereiss.top/log-viewer/`
+- 独立中奖路径：`https://qinglong.ereiss.top/winner-reminders/`
 - 凭据文件：`/var/lib/qinglong-log-viewer/token`
 - LotteryAutoScript：`/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript`
 - 取消提醒账本：`LotteryAutoScript/web_state/dismissed-wins.json`
@@ -36,6 +40,9 @@
 ```ini
 VIEWER_INSTANCE=主服务器
 PEER_VIEWER_URL=https://qinglong2.example.com/log-viewer/
+WINNER_VIEWER_URL=https://qinglong.example.com/winner-reminders/
+PEER_WINNER_URL=https://qinglong.example.com/winner-reminders-2/
+LOG_VIEWER_URL=https://qinglong.example.com/log-viewer/
 ```
 
 如果希望浏览器只登录一次，可把副服务器通过主域名的另一条路径反向代理，

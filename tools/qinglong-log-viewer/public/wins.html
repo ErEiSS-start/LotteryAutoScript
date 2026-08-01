@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>中奖提醒管理</title>
+  <link rel="stylesheet" href="./styles.css?v=6">
+</head>
+<body class="winner-body">
+  <main class="winner-page-shell">
+    <header class="wins-toolbar winner-page-header">
+      <div class="winner-heading">
+        <div class="brand-mark" aria-hidden="true">奖</div>
+        <div>
+          <h1>中奖提醒管理</h1>
+          <p><span id="viewerInstance">本服务器</span> · 与日志查看独立运行</p>
+        </div>
+      </div>
+      <div class="toolbar-actions">
+        <a id="logViewerLink" class="button-link hidden" href="#">查看本机日志</a>
+        <a id="peerWinnerLink" class="button-link hidden" href="#">打开另一台中奖管理</a>
+        <button id="refreshWins" type="button">刷新</button>
+        <button id="logoutViewer" type="button">退出登录</button>
+      </div>
+    </header>
+
+    <section class="wins-filter" aria-label="中奖提醒筛选">
+      <button class="active" type="button" data-win-status="pending">待处理 <span id="pendingCount">0</span></button>
+      <button type="button" data-win-status="dismissed">已取消 <span id="dismissedCount">0</span></button>
+      <p>“取消提醒”只停止 PushPlus 重复提醒，不会标记已读、删除或修改 B 站私信。</p>
+    </section>
+
+    <section id="winsList" class="wins-list" aria-live="polite">
+      <div class="empty-state"><strong>正在读取中奖提醒…</strong></div>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="./wins.js?v=1" defer></script>
+</body>
+</html>

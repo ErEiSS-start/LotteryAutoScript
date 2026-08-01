@@ -7,13 +7,19 @@ const http = require('http');
 const path = require('path');
 const readline = require('readline');
 const { createWinReminderStore } = require('./win-reminders');
+const { createProfileResolver } = require('./profile-resolver');
 
 const DEFAULT_LOG_ROOT = '/opt/1panel/apps/qinglong/qinglong/data/log';
 const DEFAULT_TOKEN_FILE = '/var/lib/qinglong-log-viewer/token';
 const DEFAULT_PROC_ROOT = '/proc';
 const DEFAULT_LOTTERY_ROOT = '/opt/1panel/apps/qinglong/qinglong/data/scripts/LotteryAutoScript';
 const SESSION_COOKIE = 'qlv_session';
-const SESSION_COOKIE_PATHS = Object.freeze(['/log-viewer', '/log-viewer-2']);
+const SESSION_COOKIE_PATHS = Object.freeze([
+    '/log-viewer',
+    '/log-viewer-2',
+    '/winner-reminders',
+    '/winner-reminders-2',
+]);
 const DEFAULT_SESSION_DAYS = 3650;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 // eslint-disable-next-line no-control-regex, no-useless-escape
@@ -327,6 +333,13 @@ function createLogServer(options = {}) {
     });
     const viewerInstance = options.viewerInstance || process.env.VIEWER_INSTANCE || '本服务器';
     const peerViewerUrl = options.peerViewerUrl || process.env.PEER_VIEWER_URL || '';
+    const winnerViewerUrl = options.winnerViewerUrl || process.env.WINNER_VIEWER_URL || '';
+    const peerWinnerUrl = options.peerWinnerUrl || process.env.PEER_WINNER_URL || '';
+    const logViewerUrl = options.logViewerUrl || process.env.LOG_VIEWER_URL || '';
+    const profileResolver = options.profileResolver || createProfileResolver({
+        cacheFile: options.profileCacheFile || process.env.PROFILE_CACHE_FILE
+            || path.join(lotteryRoot, 'web_state', 'profile-cache.json'),
+    });
     const detectRuntime = options.detectRuntime || createRuntimeDetector(
         options.procRoot || process.env.PROC_ROOT || DEFAULT_PROC_ROOT,
         options.runtimeCacheMs === undefined ? 2000 : options.runtimeCacheMs,
@@ -381,12 +394,36 @@ function createLogServer(options = {}) {
                 return json(res, 200, { ok: true, responseMs: Date.now() - startedAt });
             }
 
-            if (req.method === 'GET' && url.pathname === '/api/wins') {
-                const result = await winReminders.list(url.searchParams.get('status') || 'pending');
+            if (req.method === 'GET' && url.pathname === '/api/config') {
+                // 已登录的旧日志页面会在这里自动补发新增页面路径的同一会话 Cookie。
+                res.setHeader('Set-Cookie', sessionCookieHeaders(cookies[SESSION_COOKIE], sessionMaxAgeSeconds));
                 return json(res, 200, {
                     instance: viewerInstance,
                     peerViewerUrl,
-                    ...result,
+                    winnerViewerUrl,
+                    peerWinnerUrl,
+                    logViewerUrl,
+                });
+            }
+
+            if (req.method === 'GET' && url.pathname === '/api/wins') {
+                const result = await winReminders.list(url.searchParams.get('status') || 'pending');
+                const profileNames = await profileResolver.resolveMany(result.records.flatMap(record => [
+                    record.accountUid,
+                    record.senderUid || record.talkerId,
+                ]));
+                return json(res, 200, {
+                    instance: viewerInstance,
+                    peerViewerUrl,
+                    winnerViewerUrl,
+                    peerWinnerUrl,
+                    logViewerUrl,
+                    counts: result.counts,
+                    records: result.records.map(record => ({
+                        ...record,
+                        accountName: record.accountName || profileNames[record.accountUid] || '',
+                        senderName: record.senderName || profileNames[record.senderUid || record.talkerId] || '',
+                    })),
                 });
             }
 
@@ -510,7 +547,8 @@ function createLogServer(options = {}) {
             }
 
             if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-                return servePublic(res, 'index.html');
+                const appMode = String(req.headers['x-viewer-mode'] || '').toLowerCase();
+                return servePublic(res, appMode === 'winners' ? 'wins.html' : 'index.html');
             }
 
             if (req.method === 'GET' && /^\/[a-zA-Z0-9._-]+$/.test(url.pathname)) {

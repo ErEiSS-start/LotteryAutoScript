@@ -10,6 +10,7 @@ const {
     createSessionValue,
     validSessionValue,
 } = require('../server');
+const { createProfileResolver } = require('../profile-resolver');
 
 let sessionCookie = '';
 
@@ -55,6 +56,19 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     const lotteryInfo = path.join(lotteryRoot, 'lottery_info');
     const winStateFile = path.join(lotteryRoot, 'web_state', 'dismissed-wins.json');
     fs.mkdirSync(lotteryInfo);
+    let profileRequests = 0;
+    const profileResolver = createProfileResolver({
+        cacheFile: path.join(lotteryRoot, 'web_state', 'test-profile-cache.json'),
+        fetchName: async uid => {
+            profileRequests += 1;
+            return uid === '1090063081' ? '_AQWQA_' : '哔哩哔哩智能机';
+        },
+    });
+    let resolvedProfiles = await profileResolver.resolveMany(['1090063081', '12076317']);
+    assert.strictEqual(resolvedProfiles['1090063081'], '_AQWQA_');
+    assert.strictEqual(profileRequests, 2);
+    resolvedProfiles = await profileResolver.resolveMany(['1090063081', '12076317']);
+    assert.strictEqual(profileRequests, 2, '昵称应从长期缓存读取，不应重复访问公开接口');
     const winRecord = {
         id: '0123456789abcdef01234567',
         accountUid: '1090063081',
@@ -116,6 +130,10 @@ function winAction(baseUrl, action, body, actionHeader = true) {
         winStateFile,
         viewerInstance: '测试服务器',
         peerViewerUrl: 'https://peer.example/log-viewer/',
+        winnerViewerUrl: 'https://viewer.example/winner-reminders/',
+        peerWinnerUrl: 'https://viewer.example/winner-reminders-2/',
+        logViewerUrl: 'https://viewer.example/log-viewer/',
+        profileResolver,
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -151,6 +169,8 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     assert.match(setCookie, /SameSite=Strict/);
     assert.match(setCookie, /Path=\/log-viewer/);
     assert.match(setCookie, /Path=\/log-viewer-2/);
+    assert.match(setCookie, /Path=\/winner-reminders/);
+    assert.match(setCookie, /Path=\/winner-reminders-2/);
     sessionCookie = `qlv_session=${setCookie.match(/qlv_session=([^;]+)/)[1]}`;
 
     response = await request(baseUrl, '/api/list');
@@ -159,6 +179,15 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     assert.ok(payload.entries.some(entry => entry.name === 'task'));
     assert.strictEqual(payload.entries.find(entry => entry.name === 'LotteryAutoScript_start').running, true);
     assert.strictEqual(payload.entries.find(entry => entry.name === 'LotteryAutoScript_check').running, true);
+
+    response = await request(baseUrl, '/', true, { headers: { 'X-Viewer-Mode': 'winners' } });
+    assert.strictEqual(response.status, 200);
+    assert.match(await response.text(), /中奖提醒管理/);
+
+    response = await request(baseUrl, '/api/config');
+    payload = await response.json();
+    assert.strictEqual(payload.winnerViewerUrl, 'https://viewer.example/winner-reminders/');
+    assert.match(response.headers.get('set-cookie'), /Path=\/winner-reminders/);
 
     response = await request(baseUrl, '/api/list?path=LotteryAutoScript_start');
     payload = await response.json();
@@ -201,6 +230,8 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     assert.strictEqual(payload.peerViewerUrl, 'https://peer.example/log-viewer/');
     assert.strictEqual(payload.counts.pending, 1);
     assert.strictEqual(payload.records[0].content, winRecord.content, '登录后应返回完整私信正文');
+    assert.strictEqual(payload.records[0].accountName, '_AQWQA_');
+    assert.strictEqual(payload.records[0].senderName, '哔哩哔哩智能机');
 
     response = await winAction(baseUrl, 'dismiss', {
         accountUid: winRecord.accountUid,

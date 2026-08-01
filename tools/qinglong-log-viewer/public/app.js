@@ -18,9 +18,6 @@ const state = {
   directoryRequestId: 0,
   selectedRunning: false,
   loadingChunk: false,
-  winStatus: 'pending',
-  wins: [],
-  winTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -52,17 +49,7 @@ const elements = {
   logContent: $('logContent'),
   emptyState: $('emptyState'),
   toast: $('toast'),
-  logWorkspace: $('logWorkspace'),
-  winsWorkspace: $('winsWorkspace'),
-  showWins: $('showWins'),
-  winBadge: $('winBadge'),
-  viewerInstance: $('viewerInstance'),
-  peerViewer: $('peerViewer'),
-  refreshWins: $('refreshWins'),
-  backToLogs: $('backToLogs'),
-  pendingCount: $('pendingCount'),
-  dismissedCount: $('dismissedCount'),
-  winsList: $('winsList'),
+  winnerViewerLink: $('winnerViewerLink'),
   logoutViewer: $('logoutViewer'),
 };
 
@@ -125,149 +112,6 @@ async function apiPost(endpoint, body) {
   return payload;
 }
 
-function showLogWorkspace() {
-  elements.winsWorkspace.classList.add('hidden');
-  elements.logWorkspace.classList.remove('hidden');
-  elements.showWins.classList.remove('active');
-}
-
-function safeBilibiliUrl(value) {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== 'https:' || (url.hostname !== 'bilibili.com' && !url.hostname.endsWith('.bilibili.com'))) return '';
-    return url.href;
-  } catch (_) {
-    return '';
-  }
-}
-
-function reminderTime(value) {
-  const number = Number(value || 0);
-  if (!number) return '未知';
-  return formatTime(number < 10_000_000_000 ? number * 1000 : number);
-}
-
-function winMeta(label, value) {
-  const item = document.createElement('span');
-  const name = document.createElement('b');
-  name.textContent = `${label}：`;
-  item.append(name, document.createTextNode(value));
-  return item;
-}
-
-function renderWins() {
-  elements.winsList.replaceChildren();
-  if (!state.wins.length) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-state';
-    const title = document.createElement('strong');
-    title.textContent = state.winStatus === 'pending' ? '当前没有待处理提醒' : '当前没有已取消提醒';
-    const hint = document.createElement('span');
-    hint.textContent = state.winStatus === 'pending'
-      ? '只有脚本已检测并保存的中奖私信会出现在这里。'
-      : '手动取消的提醒会保留在这里，可随时恢复。';
-    empty.append(title, hint);
-    elements.winsList.append(empty);
-    return;
-  }
-  state.wins.forEach(record => {
-    const card = document.createElement('article');
-    card.className = `win-card ${record.status}`;
-
-    const header = document.createElement('header');
-    const title = document.createElement('strong');
-    title.textContent = `帐号${record.accountNumber} · UID ${record.accountUid}`;
-    const status = document.createElement('span');
-    status.className = `win-status ${record.status}`;
-    status.textContent = record.status === 'dismissed' ? '已取消提醒' : '待处理';
-    header.append(title, status);
-
-    const metadata = document.createElement('div');
-    metadata.className = 'win-meta';
-    metadata.append(
-      winMeta('发信 UID', record.senderUid || record.talkerId || '未知'),
-      winMeta('私信时间', reminderTime(record.messageTimestamp)),
-      winMeta('发现时间', reminderTime(record.detectedAt)),
-      winMeta('已推送', `${record.notifyCount} 次`),
-    );
-    if (record.lastNotifiedAt) metadata.append(winMeta('最近推送', reminderTime(record.lastNotifiedAt)));
-    if (record.dismissedAt) metadata.append(winMeta('取消时间', reminderTime(record.dismissedAt)));
-
-    const content = document.createElement('pre');
-    content.className = 'win-content';
-    content.textContent = record.content || '（私信正文为空）';
-
-    const actions = document.createElement('footer');
-    const link = safeBilibiliUrl(record.link);
-    if (link) {
-      const open = document.createElement('a');
-      open.className = 'button-link';
-      open.href = link;
-      open.target = '_blank';
-      open.rel = 'noopener';
-      open.textContent = '打开 B 站私信';
-      actions.append(open);
-    }
-    const action = document.createElement('button');
-    action.type = 'button';
-    action.className = record.status === 'dismissed' ? '' : 'danger-action';
-    action.textContent = record.status === 'dismissed' ? '恢复提醒' : '取消提醒';
-    action.addEventListener('click', async () => {
-      const dismissing = record.status !== 'dismissed';
-      const message = dismissing
-        ? '确定取消这条 PushPlus 提醒？\n\n这不会标记已读、删除或修改 B 站私信。'
-        : '确定恢复这条提醒？它会在下次中奖检查达到提醒间隔后重新推送。';
-      if (!window.confirm(message)) return;
-      action.disabled = true;
-      try {
-        await apiPost(dismissing ? 'wins/dismiss' : 'wins/restore', {
-          accountUid: record.accountUid,
-          recordId: record.recordId,
-        });
-        toast(dismissing ? '已取消后续重复提醒' : '已恢复提醒', 'success');
-        await loadWins();
-      } catch (error) {
-        toast(`操作失败：${error.message}`, 'error');
-        action.disabled = false;
-      }
-    });
-    actions.append(action);
-    card.append(header, metadata, content, actions);
-    elements.winsList.append(card);
-  });
-}
-
-async function loadWins(options = {}) {
-  try {
-    if (!options.silent) elements.winsList.setAttribute('aria-busy', 'true');
-    const payload = await api('wins', { status: state.winStatus });
-    state.wins = payload.records;
-    elements.viewerInstance.textContent = payload.instance || '本服务器';
-    elements.pendingCount.textContent = String(payload.counts.pending);
-    elements.dismissedCount.textContent = String(payload.counts.dismissed);
-    elements.winBadge.textContent = String(payload.counts.pending);
-    elements.winBadge.classList.toggle('hidden', payload.counts.pending === 0);
-    if (payload.peerViewerUrl) {
-      elements.peerViewer.href = payload.peerViewerUrl;
-      elements.peerViewer.classList.remove('hidden');
-    } else {
-      elements.peerViewer.classList.add('hidden');
-    }
-    renderWins();
-  } catch (error) {
-    if (!options.silent) toast(`中奖提醒读取失败：${error.message}`, 'error');
-  } finally {
-    elements.winsList.removeAttribute('aria-busy');
-  }
-}
-
-async function showWinWorkspace() {
-  elements.logWorkspace.classList.add('hidden');
-  elements.winsWorkspace.classList.remove('hidden');
-  elements.showWins.classList.add('active');
-  await loadWins();
-}
-
 function renderBreadcrumbs() {
   elements.breadcrumbs.replaceChildren();
   const fragments = state.directory ? state.directory.split('/') : [];
@@ -275,7 +119,7 @@ function renderBreadcrumbs() {
   root.type = 'button';
   root.className = 'crumb';
   root.textContent = '全部日志';
-  root.addEventListener('click', () => { showLogWorkspace(); loadDirectory(''); });
+  root.addEventListener('click', () => loadDirectory(''));
   elements.breadcrumbs.append(root);
   fragments.forEach((fragment, index) => {
     const separator = document.createElement('span');
@@ -287,7 +131,6 @@ function renderBreadcrumbs() {
     button.className = 'crumb';
     button.textContent = fragment;
     button.addEventListener('click', () => {
-      showLogWorkspace();
       loadDirectory(fragments.slice(0, index + 1).join('/'));
     });
     elements.breadcrumbs.append(button);
@@ -337,7 +180,6 @@ function renderFiles() {
     size.textContent = entry.type === 'file' ? formatBytes(entry.size) : '';
     row.append(icon, copy, size);
     row.addEventListener('click', () => {
-      showLogWorkspace();
       return entry.type === 'directory' ? loadDirectory(entry.path) : selectFile(entry);
     });
     elements.fileList.append(row);
@@ -567,15 +409,11 @@ document.addEventListener('visibilitychange', () => {
 });
 document.querySelectorAll('.quick-folders button').forEach(button => {
   button.addEventListener('click', async () => {
-    showLogWorkspace();
     const loaded = await loadDirectory(button.dataset.directory || '');
     const latest = state.entries.find(entry => entry.type === 'file');
     if (loaded && latest) await selectFile(latest);
   });
 });
-elements.showWins.addEventListener('click', showWinWorkspace);
-elements.backToLogs.addEventListener('click', showLogWorkspace);
-elements.refreshWins.addEventListener('click', () => loadWins());
 elements.logoutViewer.addEventListener('click', async () => {
   if (!window.confirm('确定退出日志查看器？下次访问需要重新登录。')) return;
   elements.logoutViewer.disabled = true;
@@ -587,22 +425,17 @@ elements.logoutViewer.addEventListener('click', async () => {
     elements.logoutViewer.disabled = false;
   }
 });
-document.querySelectorAll('[data-win-status]').forEach(button => {
-  button.addEventListener('click', async () => {
-    state.winStatus = button.dataset.winStatus;
-    document.querySelectorAll('[data-win-status]').forEach(item => item.classList.toggle('active', item === button));
-    await loadWins();
-  });
-});
-
 configureFollow();
 configureRuntimePolling();
 (async function bootstrap() {
-  await loadWins({ silent: true });
+  try {
+    const config = await api('config');
+    if (config.winnerViewerUrl) elements.winnerViewerLink.href = config.winnerViewerUrl;
+    else elements.winnerViewerLink.classList.add('disabled');
+  } catch (_) {
+    elements.winnerViewerLink.classList.add('disabled');
+  }
   const loaded = await loadDirectory(DEFAULT_DIRECTORY);
   const latest = state.entries.find(entry => entry.type === 'file');
   if (loaded && latest) await selectFile(latest);
 })();
-state.winTimer = setInterval(() => {
-  if (!document.hidden) loadWins({ silent: true });
-}, 60_000);
