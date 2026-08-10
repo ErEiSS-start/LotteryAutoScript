@@ -82,6 +82,30 @@ fs.writeFileSync(dismissedFilePath, '{broken');
 assert.strictEqual(store.pending().length, 1, '取消提醒账本损坏时应 fail-open，避免漏报中奖');
 fs.writeFileSync(dismissedFilePath, JSON.stringify({ version: 1, records: [] }));
 
+const ignored = store.ignoreWhere(
+    record => record.content.includes('预约成功'),
+    'test-non-winner'
+);
+assert.strictEqual(ignored.length, 0, '真实中奖记录不得被无关过滤条件归档');
+const falsePositive = store.add({
+    talkerId: '30003',
+    senderUid: '30003',
+    messageSequence: '20',
+    messageTimestamp: 200,
+    content: '预约成功，并参与了抽奖',
+});
+assert.strictEqual(falsePositive.created, true);
+assert.strictEqual(store.ignoreWhere(
+    record => record.content.includes('预约成功'),
+    'filtered-non-winner-message'
+).length, 1);
+assert.strictEqual(store.pending().length, 1, '被归档的误报不得继续进入待提醒列表');
+assert.strictEqual(
+    JSON.parse(fs.readFileSync(filePath, 'utf8')).records.find(record => record.id === falsePositive.record.id).status,
+    'ignored',
+    '误报归档状态必须持久化'
+);
+
 store.markNotified([added.record.id]);
 now += 60 * 60 * 1000;
 assert.strictEqual(store.due(2 * 60 * 60 * 1000).length, 0);
