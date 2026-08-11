@@ -20,6 +20,14 @@ async function run() {
         false
     );
     assert.strictEqual(
+        isWinnerMessage(
+            '预约成功，并参与了抽奖\n主题: 珍珠水晶送送送！\n开奖时间: 2026-05-30 14:00\n奖品: 88元现金红包（联系客服领取）',
+            keywords
+        ),
+        false,
+        '预约确认中的奖品领取说明不能覆盖预约确认屏蔽规则'
+    );
+    assert.strictEqual(
         isWinnerMessage('【有奖调研】诚邀你参与调研，完成后可能发放奖品', keywords),
         false
     );
@@ -31,6 +39,11 @@ async function run() {
         isWinnerMessage('恭喜你在本次有奖活动中中奖，请联系工作人员领奖', keywords),
         true,
         '明确中奖信号必须优先于活动邀请屏蔽词'
+    );
+    assert.strictEqual(
+        isWinnerMessage('您参与的抽奖中奖了，请联系客服领取', keywords),
+        true,
+        '真正的中奖通知仍应被识别'
     );
 
     let resolverCalls = 0;
