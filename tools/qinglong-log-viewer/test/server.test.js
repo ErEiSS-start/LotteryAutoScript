@@ -109,11 +109,20 @@ function winAction(baseUrl, action, body, actionHeader = true) {
         lastNotifiedAt: 1785541800000,
         notifyCount: 5,
     };
+    const reviewRecord = {
+        ...winRecord,
+        id: '2123456789abcdef01234567',
+        talkerId: '226257459',
+        senderUid: '226257459',
+        content: '您的大会员兑换码为 ABCD-1234',
+        status: 'review',
+        notifyCount: 1,
+    };
     fs.writeFileSync(path.join(lotteryInfo, 'pending_wins_1090063081.json'), JSON.stringify({
         version: 1,
         accountUid: '1090063081',
         accountNumber: 1,
-        records: [winRecord],
+        records: [winRecord, reviewRecord],
     }));
     fs.writeFileSync(accountRegistryFile, JSON.stringify({
         version: 1,
@@ -293,11 +302,37 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     assert.strictEqual(payload.instance, '测试服务器');
     assert.strictEqual(payload.peerViewerUrl, 'https://peer.example/log-viewer/');
     assert.strictEqual(payload.counts.pending, 1);
+    assert.strictEqual(payload.counts.review, 1);
     assert.deepStrictEqual(payload.warnings, []);
     assert.strictEqual(payload.records.some(record => record.accountUid === '20002'), false, '不得显示非本机帐号记录');
     assert.strictEqual(payload.records[0].content, winRecord.content, '登录后应返回完整私信正文');
     assert.strictEqual(payload.records[0].accountName, '_AQWQA_');
     assert.strictEqual(payload.records[0].senderName, '哔哩哔哩智能机');
+
+    response = await request(baseUrl, '/api/wins?status=review');
+    payload = await response.json();
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(payload.records.length, 1);
+    assert.strictEqual(payload.records[0].status, 'review');
+    assert.strictEqual(payload.records[0].recordStatus, 'review');
+    assert.strictEqual(payload.records[0].content, reviewRecord.content);
+
+    response = await winAction(baseUrl, 'dismiss', {
+        accountUid: reviewRecord.accountUid,
+        recordId: reviewRecord.id,
+    });
+    assert.strictEqual(response.status, 200);
+    response = await request(baseUrl, '/api/wins?status=dismissed');
+    payload = await response.json();
+    assert.strictEqual(payload.records[0].sourceStatus, 'review');
+    response = await winAction(baseUrl, 'restore', {
+        accountUid: reviewRecord.accountUid,
+        recordId: reviewRecord.id,
+    });
+    assert.strictEqual(response.status, 200);
+    response = await request(baseUrl, '/api/wins?status=review');
+    payload = await response.json();
+    assert.strictEqual(payload.records.length, 1, '归档的待确认消息应可恢复到待确认');
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(winStateFile, 'utf8')).records, [], '应清理失去对应中奖记录的账本条目');
 

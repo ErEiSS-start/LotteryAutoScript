@@ -1,12 +1,15 @@
 const assert = require('assert');
 const bili = require('../lib/net/bili');
 const {
+    classifyWinnerMessage,
     enrichPrivateMessageRecords,
     getSessionInfoWithRetry,
     identity,
     isWinnerMessage,
     privateMessageDescription,
     publicWinnerDescription,
+    reviewMessageDescription,
+    WIN_MESSAGE_CLASS,
 } = require('../lib/check');
 
 async function run() {
@@ -47,6 +50,21 @@ async function run() {
         true,
         '真正的中奖通知仍应被识别'
     );
+    assert.strictEqual(
+        classifyWinnerMessage('​【必得红包】支付宝扫码领红包了', keywords),
+        WIN_MESSAGE_CLASS.IGNORED,
+        '通用扫码红包广告不得作为中奖或待确认消息'
+    );
+    assert.strictEqual(
+        classifyWinnerMessage('恭喜您中奖，请扫码领取红包', keywords),
+        WIN_MESSAGE_CLASS.WINNER,
+        '明确个人中奖信号必须优先于扫码红包促销规则'
+    );
+    assert.strictEqual(
+        classifyWinnerMessage('您的大会员兑换码为 ABCD-1234', keywords),
+        WIN_MESSAGE_CLASS.REVIEW,
+        '只有弱关键词时应保留为一次性人工确认'
+    );
 
     let resolverCalls = 0;
     const records = await enrichPrivateMessageRecords([{
@@ -75,6 +93,13 @@ async function run() {
     assert.match(description, /发信人: 发信用户（UID 20002）/);
     assert.match(description, /中奖账号: 中奖帐号（UID 10001）/);
     assert.match(description, /私信内容:\n恭喜中奖，请填写地址/);
+
+    const reviewDescription = reviewMessageDescription([{
+        ...records[0],
+        content: '您的大会员兑换码为 ABCD-1234',
+    }]);
+    assert.match(reviewDescription, /疑似中奖私信（仅提醒一次）/);
+    assert.match(reviewDescription, /脚本不会重复提醒/);
 
     const rogContent = '恭喜共计10位小伙伴：@怪盗偷心キッド 等，请及时发送收件信息';
     const atItems = bili._parseAtInfoItems([{

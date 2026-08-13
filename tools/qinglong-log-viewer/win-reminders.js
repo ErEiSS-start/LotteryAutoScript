@@ -28,7 +28,7 @@ function normalizePendingRecord(record, document, filenameUid) {
     document = document || {};
     const accountUid = String(record.accountUid || document.accountUid || filenameUid || '');
     const recordId = String(record.id || '').toLowerCase();
-    if (!validIdentity(accountUid, recordId) || record.status !== 'pending') return null;
+    if (!validIdentity(accountUid, recordId) || !['pending', 'review'].includes(record.status)) return null;
     return {
         accountUid,
         accountNumber: Math.max(1, Number(record.accountNumber || document.accountNumber) || 1),
@@ -44,6 +44,7 @@ function normalizePendingRecord(record, document, filenameUid) {
         detectedAt: Number(record.detectedAt || 0),
         lastNotifiedAt: Number(record.lastNotifiedAt || 0),
         notifyCount: Math.max(0, Number(record.notifyCount || 0)),
+        recordStatus: record.status,
     };
 }
 
@@ -176,8 +177,8 @@ function createWinReminderStore({
     }
 
     async function list(status = 'pending') {
-        if (!['pending', 'dismissed', 'all'].includes(status)) {
-            throw Object.assign(new Error('status 只能是 pending、dismissed 或 all'), { statusCode: 400 });
+        if (!['pending', 'review', 'dismissed', 'all'].includes(status)) {
+            throw Object.assign(new Error('status 只能是 pending、review、dismissed 或 all'), { statusCode: 400 });
         }
         const [pendingResult, ledger, registry] = await Promise.all([
             readPendingRecords(),
@@ -192,7 +193,8 @@ function createWinReminderStore({
             const dismissal = dismissed.get(keyOf(record.accountUid, record.recordId));
             return {
                 ...record,
-                status: dismissal ? 'dismissed' : 'pending',
+                status: dismissal ? 'dismissed' : record.recordStatus,
+                sourceStatus: record.recordStatus,
                 dismissedAt: dismissal ? dismissal.dismissedAt : 0,
             };
         });
@@ -200,6 +202,7 @@ function createWinReminderStore({
             records: status === 'all' ? records : records.filter(record => record.status === status),
             counts: {
                 pending: records.filter(record => record.status === 'pending').length,
+                review: records.filter(record => record.status === 'review').length,
                 dismissed: records.filter(record => record.status === 'dismissed').length,
             },
             warnings: [...pendingResult.warnings, ...registry.warnings, ...(ledger.warning ? [ledger.warning] : [])],
@@ -253,7 +256,14 @@ function createWinReminderStore({
                 });
             }
             await writeLedger(withoutRecord);
-            return { accountUid: normalizedUid, recordId: normalizedId, status: dismissed ? 'dismissed' : 'pending' };
+            const sourceRecord = pendingResult.records.find(record => (
+                record.accountUid === normalizedUid && record.recordId === normalizedId
+            ));
+            return {
+                accountUid: normalizedUid,
+                recordId: normalizedId,
+                status: dismissed ? 'dismissed' : sourceRecord.recordStatus,
+            };
         });
         writeQueue = operation.catch(() => {});
         return operation;

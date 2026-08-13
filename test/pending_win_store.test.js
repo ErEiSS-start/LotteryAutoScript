@@ -131,4 +131,48 @@ assert.strictEqual(reloaded.pending().length, 0);
 
 const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8'));
 assert.strictEqual(persisted.records[0].status, 'acknowledged');
+
+const reviewFilePath = path.join(directory, 'review.json');
+const reviewStore = new PendingWinStore({
+    accountUid: '40004',
+    accountNumber: 4,
+    filePath: reviewFilePath,
+    now: () => now,
+    logger,
+    dismissedFilePath: path.join(directory, 'web_state', 'review-dismissed.json'),
+});
+const legacyWeakRecord = reviewStore.add({
+    talkerId: '50005',
+    senderUid: '50005',
+    messageSequence: '30',
+    messageTimestamp: 300,
+    content: '您的大会员兑换码为 ABCD-1234',
+});
+reviewStore.markNotified([legacyWeakRecord.record.id]);
+const migrated = reviewStore.reclassify(record => (
+    record.content.includes('兑换码') ? 'review' : 'winner'
+));
+assert.strictEqual(migrated.review.length, 1, '旧弱关键词记录应迁移为待确认');
+assert.strictEqual(reviewStore.pending().length, 0);
+assert.strictEqual(reviewStore.reviews().length, 1);
+assert.strictEqual(reviewStore.dueReviews().length, 0, '已经提醒过的旧记录迁移后不得再次推送');
+
+const newReview = reviewStore.add({
+    talkerId: '60006',
+    senderUid: '60006',
+    messageSequence: '40',
+    messageTimestamp: 400,
+    content: '请核对这条疑似中奖消息',
+    status: 'review',
+});
+assert.strictEqual(newReview.record.status, 'review');
+assert.strictEqual(reviewStore.dueReviews().length, 1, '新疑似记录只能进入首次提醒队列');
+reviewStore.markNotified([newReview.record.id]);
+assert.strictEqual(reviewStore.dueReviews().length, 0, '疑似记录提醒一次后不得重复提醒');
+
+const ignoredReview = reviewStore.reclassify(record => (
+    record.id === newReview.record.id ? 'ignored' : 'review'
+));
+assert.strictEqual(ignoredReview.ignored.length, 1);
+assert.strictEqual(reviewStore.reviews().length, 1, '归档误报不得继续出现在待确认列表');
 fs.rmSync(directory, { recursive: true, force: true });

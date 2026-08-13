@@ -4,7 +4,7 @@ const state = {
   status: 'pending',
   renderedStatus: '',
   records: [],
-  recordsByStatus: { pending: null, dismissed: null },
+  recordsByStatus: { pending: null, review: null, dismissed: null },
   request: null,
   requestSequence: 0,
 };
@@ -16,6 +16,7 @@ const elements = {
   refreshWins: $('refreshWins'),
   logoutViewer: $('logoutViewer'),
   pendingCount: $('pendingCount'),
+  reviewCount: $('reviewCount'),
   dismissedCount: $('dismissedCount'),
   winSyncStatus: $('winSyncStatus'),
   winsWarnings: $('winsWarnings'),
@@ -166,11 +167,15 @@ function render() {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     const title = document.createElement('strong');
-    title.textContent = state.status === 'pending' ? '当前没有待处理提醒' : '当前没有已取消提醒';
+    title.textContent = state.status === 'pending'
+      ? '当前没有待领取提醒'
+      : state.status === 'review' ? '当前没有待确认消息' : '当前没有已归档记录';
     const hint = document.createElement('span');
     hint.textContent = state.status === 'pending'
-      ? '只有脚本已经检测并保存的中奖私信会出现在这里。'
-      : '手动取消的提醒会保留在这里，可随时恢复。';
+      ? '只有具备明确中奖信号的私信会持续提醒。'
+      : state.status === 'review'
+        ? '只有弱中奖线索的私信只推送一次，可人工归档。'
+        : '手动归档的记录会保留在这里，可随时恢复。';
     empty.append(title, hint);
     elements.winsList.append(empty);
     return;
@@ -184,7 +189,9 @@ function render() {
     title.textContent = `中奖账号：${identity(record.accountName, record.accountUid)}`;
     const status = document.createElement('span');
     status.className = `win-status ${record.status}`;
-    status.textContent = record.status === 'dismissed' ? '已取消提醒' : '待处理';
+    status.textContent = record.status === 'dismissed'
+      ? `已归档${record.sourceStatus === 'review' ? '（原待确认）' : ''}`
+      : record.status === 'review' ? '待确认' : '待领取';
     header.append(title, status);
 
     const meta = document.createElement('div');
@@ -197,7 +204,7 @@ function render() {
       metadata('已推送', `${record.notifyCount} 次`),
     );
     if (record.lastNotifiedAt) meta.append(metadata('最近推送', formatTime(record.lastNotifiedAt)));
-    if (record.dismissedAt) meta.append(metadata('取消时间', formatTime(record.dismissedAt)));
+    if (record.dismissedAt) meta.append(metadata('归档时间', formatTime(record.dismissedAt)));
 
     const content = document.createElement('pre');
     content.className = 'win-content';
@@ -211,12 +218,18 @@ function render() {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = record.status === 'dismissed' ? '' : 'danger-action';
-    toggle.textContent = record.status === 'dismissed' ? '恢复提醒' : '取消提醒';
+    toggle.textContent = record.status === 'dismissed'
+      ? (record.sourceStatus === 'review' ? '恢复待确认' : '恢复提醒')
+      : record.status === 'review' ? '归档' : '取消提醒';
     toggle.addEventListener('click', async () => {
       const dismissing = record.status !== 'dismissed';
       const prompt = dismissing
-        ? '确定取消这条 PushPlus 提醒？\n\n这不会标记已读、删除或修改 B 站私信。'
-        : '确定恢复这条提醒？达到提醒间隔后会重新推送。';
+        ? record.status === 'review'
+          ? '确定归档这条待确认消息？\n\n这不会标记已读、删除或修改 B 站私信。'
+          : '确定取消这条 PushPlus 提醒？\n\n这不会标记已读、删除或修改 B 站私信。'
+        : record.sourceStatus === 'review'
+          ? '确定恢复到待确认？疑似中奖消息不会再次推送。'
+          : '确定恢复这条提醒？达到提醒间隔后会重新推送。';
       if (!window.confirm(prompt)) return;
       toggle.disabled = true;
       try {
@@ -225,8 +238,14 @@ function render() {
           recordId: record.recordId,
         });
         state.recordsByStatus.pending = null;
+        state.recordsByStatus.review = null;
         state.recordsByStatus.dismissed = null;
-        toast(dismissing ? '已取消后续重复提醒' : '已恢复提醒', 'success');
+        toast(
+          dismissing
+            ? (record.status === 'review' ? '已归档待确认消息' : '已取消后续重复提醒')
+            : (record.sourceStatus === 'review' ? '已恢复到待确认' : '已恢复提醒'),
+          'success'
+        );
         await loadWins();
       } catch (error) {
         toast(`操作失败：${error.message}`, 'error');
@@ -267,6 +286,7 @@ async function loadWins(options = {}) {
     state.renderedStatus = requestedStatus;
     elements.viewerInstance.textContent = payload.instance || '本服务器';
     elements.pendingCount.textContent = String(payload.counts.pending);
+    elements.reviewCount.textContent = String(payload.counts.review);
     elements.dismissedCount.textContent = String(payload.counts.dismissed);
     const warnings = Array.isArray(payload.warnings) ? payload.warnings.filter(Boolean) : [];
     elements.winsWarnings.replaceChildren(...warnings.map(message => {

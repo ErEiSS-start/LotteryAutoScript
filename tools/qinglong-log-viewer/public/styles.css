@@ -378,6 +378,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
   box-shadow: 0 9px 25px rgba(0, 0, 0, .16);
 }
 .win-card.dismissed { border-color: var(--line); opacity: .84; }
+.win-card.review { border-color: rgba(255, 200, 87, .52); }
 .win-card header, .win-card footer {
   display: flex;
   gap: 9px;
@@ -387,6 +388,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
 .win-card footer { justify-content: flex-end; }
 .win-status { padding: 3px 8px; border-radius: 999px; color: var(--warn); background: rgba(255, 200, 87, .1); font-size: 11px; }
 .win-status.dismissed { color: var(--muted); background: rgba(132, 147, 166, .12); }
+.win-status.review { color: var(--warn); background: rgba(255, 200, 87, .14); }
 .win-meta { display: flex; flex-wrap: wrap; gap: 7px 18px; margin-top: 10px; color: var(--muted); font-size: 12px; }
 .win-meta b { color: #b5c2d0; font-weight: 600; }
 .win-content {

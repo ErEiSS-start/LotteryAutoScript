@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <title>中奖提醒管理</title>
-  <link rel="stylesheet" href="./styles.css?v=8">
+  <link rel="stylesheet" href="./styles.css?v=9">
 </head>
 <body class="winner-body">
   <main class="winner-page-shell">
@@ -27,8 +27,9 @@
 
     <section class="wins-filter" aria-label="中奖提醒筛选">
       <button class="active" type="button" data-win-status="pending">待处理 <span id="pendingCount">0</span></button>
-      <button type="button" data-win-status="dismissed">已取消 <span id="dismissedCount">0</span></button>
-      <p>“取消提醒”只停止 PushPlus 重复提醒，不会标记已读、删除或修改 B 站私信。</p>
+      <button type="button" data-win-status="review">待确认 <span id="reviewCount">0</span></button>
+      <button type="button" data-win-status="dismissed">已归档 <span id="dismissedCount">0</span></button>
+      <p>疑似中奖只推送一次；归档只停止展示与提醒，不会标记已读、删除或修改 B 站私信。</p>
     </section>
 
     <section id="winsWarnings" class="wins-warnings hidden" role="alert"></section>
@@ -38,6 +39,6 @@
     </section>
   </main>
   <div id="toast" class="toast" role="status"></div>
-  <script src="./wins.js?v=3" defer></script>
+  <script src="./wins.js?v=4" defer></script>
 </body>
 </html>
