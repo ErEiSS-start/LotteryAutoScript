@@ -178,13 +178,6 @@ async function runRoundRobin(accounts, localhost) {
             }
         }
 
-        try {
-            const { preJudgeSharedSnapshot } = require('./lib/helper/ai_judge');
-            await preJudgeSharedSnapshot(snapshotFilename);
-        } catch (error) {
-            log.error('AI预判', `固定快照预判异常，参与阶段将按关键词规则降级: ${error.message || error}`);
-        }
-
         if (Number(firstAccount.WAIT) > 0) {
             log.info('轮转采集', `固定快照完成，${Number(firstAccount.WAIT) / 1000}秒后开始第一轮`);
             await delay(Number(firstAccount.WAIT));

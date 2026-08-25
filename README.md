@@ -88,7 +88,7 @@ flowchart TD
 
 ### 本地判断与可选 AI
 
-当前推荐使用原有 `key_words` 本地规则判断抽奖，仅保留AI生成差异化评论。这样不会让模型绕过关键词规则放行无关视频，也省去固定快照的AI预判时间。仓库仍保留可选的AI判断能力，之后需要时可以重新开启。
+当前推荐使用原有 `key_words` 本地规则判断抽奖，仅保留AI生成差异化评论。这样不会让模型绕过关键词规则放行无关视频，也不会在固定快照阶段产生额外AI请求。仓库仍保留可选的旧版AI判断能力，之后需要时可以重新开启。
 
 在 `env.js` 的 `account_parm` 中启用：
 
@@ -105,11 +105,13 @@ ZHIPU_API_KEY_2=第二个智谱帐号密钥
 ZHIPU_API_KEY_3=第三个智谱帐号密钥
 ```
 
-编号可以不连续，空值和重复密钥会被忽略。只要存在有效的编号密钥，程序就只使用编号密钥；否则依次回退到单个 `ZHIPU_API_KEY` 和旧版 `AI_API_KEY`。密钥按请求轮换，每个帐号独立记录限流与熔断状态，AI判断和AI评论共用同一密钥池。供应商 URL、模型和参数见 `my_config.example.js` 的 `ai_judge_parm.providers` 与 `ai_comments_parm.providers`。
+编号可以不连续，空值和重复密钥会被忽略。AI评论会按请求轮换这些密钥，并使用独立的限流与熔断状态。供应商 URL、模型和参数见 `my_config.example.js` 的 `ai_comments_parm.providers`。
 
-关闭 `ENABLE_AI_JUDGE` 后，固定快照不会发出AI判断请求，非官方候选必须同时满足 `key_words` 中的全部规则；`is_imitator` 应保持 `false`，避免UID来源绕过关键词。AI判断缓存会保留在磁盘但不会参与筛选。若重新开启AI判断，帐号1会串行预判非官方候选并复用 `lottery_info/ai_judge_cache.json`。
+关闭 `ENABLE_AI_JUDGE` 后，不会发出任何AI判断请求；非官方候选必须同时满足 `key_words` 中的全部规则；`is_imitator` 应保持 `false`，避免UID来源绕过关键词。
 
-判断和评论都强制使用结构化 JSON，并显式关闭思考，减少延迟和无用Token。`429` 或错误码 `1302` 只熔断当前密钥并尝试下一个智谱帐号；错误码 `1305` 表示模型公共资源繁忙，会冷却该模型并直接尝试其他模型，不会逐个消耗同模型密钥。超时、503或无效响应连续3次才熔断。相关控制项为 `ai_request_timeout`、`ai_provider_retry_count`、`ai_circuit_failure_threshold`、`ai_circuit_cooldown`、`ai_model_busy_cooldown`、`ai_prejudge_max_outage_wait`、`ai_judge_interval` 和 `ai_judge_provider_retry_count`；`ai_judge_concurrency` 仅为旧配置兼容，预判始终串行。
+如需重新开启AI判断，逻辑与 `d495e61` 之前一致：筛选到每条非官方候选时，只直接请求一次AI，不预判固定快照、不使用判断缓存、不轮换密钥、不做主备/熔断切换。请求失败或返回非JSON时立即保留本地关键词结果。为兼容现有配置，`ai_judge_parm.providers` 只会取第一个可用供应商；它的 `api_key_env` 必须指向一个单独存在的密钥（例如 `ZHIPU_API_KEY`）。旧版 `url`、`body` 与 `AI_API_KEY` 配置也仍可用。
+
+AI评论仍使用结构化 JSON、密钥轮换和限流保护：`429` 或错误码 `1302` 会切换下一枚密钥；`1305` 会冷却当前模型并使用本地短评补齐。相关AI评论控制项为 `ai_request_timeout`、`ai_provider_retry_count`、`ai_circuit_failure_threshold`、`ai_circuit_cooldown`、`ai_model_busy_cooldown`、`ai_comment_provider_retry_count` 和 `ai_comment_pack_enabled`。
 
 ### 轮转配置
 

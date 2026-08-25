@@ -163,25 +163,26 @@ module.exports = Object.freeze({
             '[转关评粉]|参与'
         ],
 
-        /** AI调用控制 */
+        /** AI评论供应商通用控制；AI判断保持旧版单次直连。 */
         ai_request_timeout: 30 * 1000,
         ai_provider_retry_count: 1,
         ai_circuit_failure_threshold: 3,
         ai_circuit_cooldown: 10 * 60 * 1000,
         // 1305代表模型公共资源繁忙，按模型冷却后切换其他模型。
         ai_model_busy_cooldown: 2 * 60 * 1000,
-        // 全部AI账号不可用时最多等待30分钟，再对剩余候选使用关键词降级。
+        // 旧版AI预判兼容字段；当前AI判断不再使用。
         ai_prejudge_max_outage_wait: 30 * 60 * 1000,
-        // 免费GLM帐号通常只允许较低并发，保持单请求可避免1302。
+        // 旧版AI预判兼容字段；当前AI判断不再使用。
         ai_judge_concurrency: 1,
-        // AI预判固定串行，真实请求之间等待3秒；缓存命中不等待。
+        // 旧版AI预判兼容字段；当前AI判断不再使用。
         ai_judge_interval: 3 * 1000,
-        // 同一候选不在同一智谱帐号上立即重试，失败时直接轮换下一帐号。
+        // 旧版AI预判兼容字段；当前AI判断不再使用。
         ai_judge_provider_retry_count: 0,
 
         /**
-         * AI判断：使用稳定的免费GLM-4-Flash-250414处理批量分类。
-         * 每个非官方动态只判断一次，并跨帐号复用lottery_info目录中的缓存。
+         * AI判断默认关闭。手动开启后在筛选时单次直连第一个provider，
+         * 不预判固定快照、不使用缓存、不轮换密钥、不做主备切换。
+         * api_key_env 应指定一个单独存在的密钥，例如 ZHIPU_API_KEY。
          */
         ai_judge_parm: {
             providers: [
