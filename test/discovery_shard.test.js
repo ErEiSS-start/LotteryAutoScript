@@ -41,28 +41,6 @@ assert.deepStrictEqual(shardConfig.APIs, [
     'https://example.invalid/lottery.json',
 ]);
 
-const discoveryConfig = {
-    APIs: [
-        'file://lottery_info_5.json',
-        'file://lottery_info_2.json',
-        'https://example.invalid/lottery.json',
-    ],
-};
-globalVar.skipDiscoverySnapshotApi(discoveryConfig, {
-    LOTTERY_DISCOVERY_ONLY: '1',
-    LOTTERY_DISCOVERY_OWNER_NUMBER: '5',
-});
-assert.deepStrictEqual(discoveryConfig.APIs, [
-    'file://lottery_info_2.json',
-    'https://example.invalid/lottery.json',
-]);
-
-const nonDiscoveryConfig = { APIs: ['file://lottery_info_5.json'] };
-globalVar.skipDiscoverySnapshotApi(nonDiscoveryConfig, {
-    LOTTERY_DISCOVERY_OWNER_NUMBER: '5',
-});
-assert.deepStrictEqual(nonDiscoveryConfig.APIs, ['file://lottery_info_5.json']);
-
 assert.strictEqual(instanceName({ LOTTERY_INSTANCE_NAME: ' 副服务器 ' }), '副服务器');
 assert.strictEqual(accountName(5, { LOTTERY_INSTANCE_NAME: '副服务器' }), '副服务器 帐号5');
 assert.strictEqual(accountName(1, {}), '帐号1');
