@@ -11,6 +11,7 @@ const {
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const request = require('https');
 const { writeLocalAccountRegistry } = require('./lib/helper/local_account_registry');
+const taskResult = require('./lib/helper/task_result');
 const metainfo = [
     '  _           _   _                   _____           _       _   ',
     ' | |         | | | |                 / ____|         (_)     | |  ',
@@ -75,6 +76,10 @@ async function runAccount(account, localhost) {
     }
     try {
         return await main();
+    } catch (error) {
+        taskResult.fail('ACCOUNT_EXCEPTION', process.env.lottery_mode || 'startup');
+        log.error('帐号执行异常', '详情见本轮日志；继续其他帐号');
+        return '帐号执行异常';
     } finally {
         request.globalAgent = localhost;
     }
@@ -95,7 +100,7 @@ async function runRoundRobin(accounts, localhost) {
     } = require('./lib/helper/discovery_state');
     const firstAccount = accounts[0];
 
-    if (!firstAccount) return '未配置可用帐号';
+    if (!firstAccount) { taskResult.fail('NO_ACCOUNTS', 'startup', true); return '未配置可用帐号'; }
 
     config.init();
     const configuredDiscoveryNumber = Number(
@@ -169,11 +174,13 @@ async function runRoundRobin(accounts, localhost) {
             delete process.env.LOTTERY_DISCOVERY_MODE;
             delete process.env.LOTTERY_DISCOVERY_OWNER_NUMBER;
 
-            if (discoveryError) return discoveryError;
+            if (discoveryError) { taskResult.fail('DISCOVERY_INCOMPLETE', 'discovery', true); return discoveryError; }
             if (!cookieValid) {
+                taskResult.fail('DISCOVERY_INCOMPLETE', 'discovery', true);
                 return `帐号${firstAccount.NUMBER} Cookie失效，无法生成固定快照`;
             }
             if (!committed) {
+                taskResult.fail('DISCOVERY_INCOMPLETE', 'discovery', true);
                 return '本轮没有生成有效固定快照，已保留正式文件和可恢复断点且不会开始参与';
             }
         }
@@ -202,13 +209,14 @@ async function runRoundRobin(accounts, localhost) {
             for (const [index, account] of pendingAccounts.entries()) {
                 process.env.LOTTERY_COMMENT_SLOT = String(commentSlots.get(String(account.NUMBER)) || 0);
                 errMsg = await runAccount(account, localhost);
-                if (errMsg) return errMsg;
+                if (errMsg) { taskResult.fail('ACCOUNT_EXCEPTION', 'start'); continue; }
 
                 const cookieValid = global_var.get('accountCookieValid');
                 const result = global_var.get('lotteryBatchResult') || {};
                 if (!cookieValid) {
                     log.warn('轮转参与', `帐号${account.NUMBER} Cookie失效，停止该帐号后续轮次`);
                 } else if (result.errorStatus) {
+                    taskResult.fail('ACCOUNT_STOPPED', 'start');
                     log.warn('轮转参与', `帐号${account.NUMBER}遇到停止状态${result.errorStatus}，停止该帐号后续轮次`);
                 } else if (result.needsAnotherRound) {
                     nextRound.push(account);
@@ -258,12 +266,13 @@ async function runRoundRobin(accounts, localhost) {
             }
         }
 
+        if (taskResult.hasFailures()) log.warn('轮转参与', '部分帐号未完成，详情见结构化任务结果');
         if (preservedAccounts.length) {
             log.warn(
                 '轮转参与',
                 `本次轮转结束，共完成${round}轮；帐号${preservedAccounts.join('、')}仍有暂缓候选，下次任务继续`
             );
-        } else {
+        } else if (!taskResult.hasFailures()) {
             log.info('轮转参与', `全部帐号已处理完本轮固定快照，共完成${round}轮`);
         }
     } finally {
@@ -293,6 +302,7 @@ async function main() {
             }
         }
         if (!Array.isArray(muti_acco) || !muti_acco.length) {
+            taskResult.fail('NO_ACCOUNTS', 'startup', true);
             return '未找到可用的多帐号Cookie；若已开启Ray Cookie自动导入，请检查青龙中的Ray_BiliBiliCookies__*';
         }
 
@@ -306,7 +316,7 @@ async function main() {
 
             for (const acco of muti_acco) {
                 const err_msg = await runAccount(acco, localhost);
-                if (err_msg) return err_msg;
+                if (err_msg) taskResult.fail('ACCOUNT_EXCEPTION', process.env.lottery_mode || 'startup');
                 await delay(ck_flag === 1 ? Number(acco.WAIT) || 0 : 3 * 1000);
             }
         } finally {
@@ -317,6 +327,7 @@ async function main() {
             process.env.ENABLE_MULTIPLE_ACCOUNT = ENABLE_MULTIPLE_ACCOUNT;
         }
     } else if (COOKIE) {
+        taskResult.account({ COOKIE, NUMBER });
         const global_var = require('./lib/data/global_var');
         await global_var.init(COOKIE, NUMBER);
 
@@ -330,6 +341,7 @@ async function main() {
         const help_msg = '用法: lottery [OPTIONS]\n\nOPTIONS:\n\tstart  启动抽奖\n\tcheck  中奖检查\n\tacount 查看帐号信息\n\tclear  清理动态和关注\n\tlogin 扫码登录更新CK\n\tupdate 检查更新\n\thelp   帮助信息';
         if (await checkCookie(NUMBER)) {
             global_var.set('accountCookieValid', true);
+            taskResult.passed('login');
             const {
                 lottery_loop_wait,
                 check_loop_wait,
@@ -353,17 +365,20 @@ async function main() {
                         }
                     }
                     await start(NUMBER);
+                    taskResult.passed('start');
                     break;
                 case 'check':
                     log.info('中奖检测', '检查是否中奖');
                     loop_wait = check_loop_wait;
                     await isMe(NUMBER);
+                    taskResult.passed('check');
                     break;
                 case 'clear':
                     if (CLEAR) {
                         log.info('清理动态', '开始运行');
                         loop_wait = clear_loop_wait;
                         await clear();
+                        taskResult.passed('clear');
                     }
                     break;
                 case 'login':
@@ -383,6 +398,7 @@ async function main() {
         } else {
             log.error('Cookie已失效', '切换账号时不要点击退出账号而应直接删除Cookie退出');
             ck_flag = -1;
+            taskResult.fail('LOGIN_FAILED', 'login');
             if (mode === 'login') {
                 log.info('登陆', '开始扫码');
                 await login(NUMBER);
@@ -390,6 +406,7 @@ async function main() {
             }
         }
     } else {
+        taskResult.fail('NO_ACCOUNTS', 'startup', true);
         return '请查看README文件, 在env.js指定位置填入cookie';
     }
 }
@@ -481,7 +498,7 @@ function initConfig() {
 async function cli() {
     log.rainbow(metainfo);
 
-    if (initEnv() || initConfig()) return;
+    if (initEnv() || initConfig()) { taskResult.fail('CONFIG_INVALID', 'startup', true); process.exitCode = taskResult.finish(); return; }
 
     /**OPTIONS */
     process.env.lottery_mode = process.argv[2];
@@ -497,6 +514,7 @@ async function cli() {
 
     const err_msg = await main();
     if (err_msg) {
+        if (!taskResult.hasFailures()) taskResult.fail('CONFIG_INVALID', 'startup', true);
         log.error('错误', err_msg);
         log.warn('结束运行', '5秒后自动退出');
         await delay(5 * 1000);
@@ -504,18 +522,25 @@ async function cli() {
         while (loop_wait) {
             log.info('程序休眠', `${loop_wait / 1000}秒后再次启动`);
             await delay(loop_wait);
-            if (initEnv() || initConfig()) return;
-            await main();
+            if (initEnv() || initConfig()) { taskResult.fail('CONFIG_INVALID', 'startup', true); break; }
+            const error = await main();
+            if (error) { taskResult.fail('CONFIG_INVALID', 'startup', true); break; }
         }
         log.info('结束运行', '未在my_config.js中设置休眠时间');
     }
 
-    process.exit(0);
+    process.exitCode = taskResult.finish();
 }
 
-if (require.main === module) cli();
+if (require.main === module) {
+    const fatal = () => { taskResult.fail('UNCAUGHT_EXCEPTION', 'runtime', true); taskResult.finish(); console.error('任务异常退出；结构化结果已保存'); process.exit(1); };
+    process.on('unhandledRejection', fatal);
+    cli().catch(fatal);
+}
 
 module.exports = {
+    main,
+    cli,
     runRoundRobin,
     setAccountEnv,
 };

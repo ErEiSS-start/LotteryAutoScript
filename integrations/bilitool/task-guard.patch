@@ -1,0 +1,366 @@
+--- a/src/Ray.BiliBiliTool.Application/Attributes/TaskInterceptorAttribute.cs
++++ b/src/Ray.BiliBiliTool.Application/Attributes/TaskInterceptorAttribute.cs
+@@ -45,7 +45,10 @@
+     public override void OnException(MethodContext context)
+     {
+         if (context.Exception is not OperationCanceledException)
++        {
+             TaskExecutionFailureScope.MarkFailed();
++            ConsoleTaskResult.Fail();
++        }
+         if (rethrowWhenException)
+         {
+             _logger.LogError("程序发生异常：{msg}", context.Exception?.Message ?? "");
+--- a/src/Ray.BiliBiliTool.Application/BaseMultiAccountsAppService.cs
++++ b/src/Ray.BiliBiliTool.Application/BaseMultiAccountsAppService.cs
+@@ -36,6 +36,7 @@
+         {
+             logger.LogInformation("######### 账号 {num} #########" + Environment.NewLine, i);
+             var ck = cookieStrFactory.GetCookie(i);
++            if (TaskKey == "DailyTaskAppService") ConsoleTaskResult.Begin(ck.UserId);
+             try
+             {
+                 await cookieTaskGuard.EnsureValidAsync(ck.UserId, ck.ToString(), cancellationToken);
+@@ -55,7 +56,7 @@
+             }
+             catch (Exception e)
+             {
+-                //ignore
++                ConsoleTaskResult.Fail();
+                 logger.LogWarning("异常：{msg}", e);
+                 await WriteRecordAsync(
+                     ck,
+--- a/src/Ray.BiliBiliTool.Application/CookieTaskGuard.cs
++++ b/src/Ray.BiliBiliTool.Application/CookieTaskGuard.cs
+@@ -107,7 +107,8 @@
+ 
+             var now = timeProvider.GetUtcNow();
+             if (
+-                state.NotifiedDate != today
++                !Ray.BiliBiliTool.Infrastructure.ConsoleTaskResult.Active
++                && state.NotifiedDate != today
+                 && (
+                     state.NotificationAttempt is null
+                     || now - state.NotificationAttempt >= NotificationRetryDelay
+--- a/src/Ray.BiliBiliTool.Application/DailyTaskAppService.cs
++++ b/src/Ray.BiliBiliTool.Application/DailyTaskAppService.cs
+@@ -1,3 +1,4 @@
++using Ray.BiliBiliTool.Infrastructure;
+ using Microsoft.Extensions.Configuration;
+ using Microsoft.Extensions.Logging;
+ using Microsoft.Extensions.Options;
+@@ -97,10 +98,17 @@
+                 //每日任务赚经验：
+                 UserInfo userInfo = await Login(ck);
+ 
++                ConsoleTaskResult.Pass("login");
++                ConsoleTaskResult.Stage("status");
+                 DailyTaskInfo dailyTaskInfo = await GetDailyTaskStatus(ck);
++                ConsoleTaskResult.Stage("watch");
+                 await WatchAndShareVideo(dailyTaskInfo, ck);
+ 
++                ConsoleTaskResult.Pass("watch");
++                ConsoleTaskResult.Stage("donate");
+                 await AddCoins(userInfo, ck);
++                ConsoleTaskResult.Pass("donate");
++                ConsoleTaskResult.Stage("benefits");
+ 
+                 await ReceiveVipPrivilege(userInfo, ck);
+             }
+--- a/src/Ray.BiliBiliTool.Console/Program.cs
++++ b/src/Ray.BiliBiliTool.Console/Program.cs
+@@ -26,10 +26,11 @@
+         try
+         {
+             await host.RunAsync();
+-            return 0;
++            return ConsoleTaskResult.Finish();
+         }
+         catch (Exception ex)
+         {
++            ConsoleTaskResult.Fatal();
+             Log.Fatal(ex, "Host terminated unexpectedly!");
+             return 1;
+         }
+@@ -115,6 +116,7 @@
+             {
+                 services.AddHostedService<BiliBiliToolHostedService>();
+                 services.AddConsoleCoreServices(hostContext.Configuration);
++                if (ConsoleTaskResult.Active) services.AddSingleton<Ray.BiliBiliTool.Application.Contracts.ITaskRecordWriter, ConsoleTaskResult>();
+             }
+         );
+ 
+--- a/src/Ray.BiliBiliTool.DomainService/DonateCoinDomainService.cs
++++ b/src/Ray.BiliBiliTool.DomainService/DonateCoinDomainService.cs
+@@ -1,4 +1,5 @@
+-﻿using Microsoft.Extensions.Logging;
++﻿using Ray.BiliBiliTool.Infrastructure;
++using Microsoft.Extensions.Logging;
+ using Microsoft.Extensions.Options;
+ using Ray.BiliBiliTool.Agent;
+ using Ray.BiliBiliTool.Agent.BiliBiliAgent.Dtos;
+@@ -57,6 +58,7 @@
+         }
+         catch (InvalidOperationException ex)
+         {
++            ConsoleTaskResult.Fail("DONATE_FAILED", "donate");
+             logger.LogWarning("获取今日已投币数失败，跳过本次投币：{message}", ex.Message);
+             return;
+         }
+@@ -73,6 +75,7 @@
+         }
+         catch (InvalidOperationException ex)
+         {
++            ConsoleTaskResult.Fail("DONATE_FAILED", "donate");
+             logger.LogWarning("获取硬币余额失败，跳过本次投币：{message}", ex.Message);
+             return;
+         }
+@@ -85,12 +88,14 @@
+ 
+         if (coinBalance <= 0)
+         {
++            ConsoleTaskResult.Warn("INSUFFICIENT_COINS");
+             logger.LogInformation("因硬币余额不足，今日暂不执行投币任务");
+             return;
+         }
+ 
+         if (coinBalance <= protectedCoins)
+         {
++            ConsoleTaskResult.Warn("PROTECTED_COINS");
+             logger.LogInformation("因硬币余额达到或低于保留值，今日暂不执行投币任务");
+             return;
+         }
+@@ -136,7 +141,10 @@
+         if (success == needCoins)
+             logger.LogInformation("视频投币任务完成");
+         else
++        {
++            ConsoleTaskResult.Fail("DONATE_FAILED", "donate");
+             logger.LogInformation("投币尝试超过10次，已终止");
++        }
+ 
+         logger.LogInformation(
+             "【硬币余额】{coin}",
+--- a/src/Ray.BiliBiliTool.DomainService/VideoDomainService.cs
++++ b/src/Ray.BiliBiliTool.DomainService/VideoDomainService.cs
+@@ -1,4 +1,5 @@
+-﻿using Microsoft.Extensions.Logging;
++﻿using Ray.BiliBiliTool.Infrastructure;
++using Microsoft.Extensions.Logging;
+ using Microsoft.Extensions.Options;
+ using Ray.BiliBiliTool.Agent;
+ using Ray.BiliBiliTool.Agent.BiliBiliAgent.Dtos;
+@@ -139,6 +140,7 @@
+                 catch (Exception e)
+                 {
+                     //ignore
++                    ConsoleTaskResult.Fail("WATCH_FAILED", "watch");
+                     logger.LogError("打开视频异常：{msg}", e.Message);
+                 }
+             }
+@@ -191,6 +193,7 @@
+         }
+         else
+         {
++            ConsoleTaskResult.Fail("WATCH_FAILED", "watch");
+             logger.LogError("视频播放失败，原因：{msg}", apiResponse.Message);
+         }
+     }
+@@ -209,6 +212,7 @@
+         // so skip today's share without retrying.
+         if (apiResponse.Code == -403)
+         {
++            ConsoleTaskResult.Warn("SHARE_RESTRICTED");
+             logger.LogWarning(
+                 "视频分享被-403拒绝（账号级风控标记），跳过当日分享，aid：{aid}",
+                 videoInfo.Aid
+@@ -223,6 +227,7 @@
+         }
+         else
+         {
++            ConsoleTaskResult.Fail("DAILY_FAILED", "share");
+             logger.LogError("视频分享失败，原因: {msg}", apiResponse.Message);
+         }
+     }
+@@ -259,6 +264,7 @@
+         }
+         else
+         {
++            ConsoleTaskResult.Fail("WATCH_FAILED", "watch");
+             logger.LogError("视频打开失败，原因：{msg}", apiResponse.Message);
+             return false;
+         }
+--- /dev/null
++++ b/src/Ray.BiliBiliTool.Infrastructure/ConsoleTaskResult.cs
+@@ -0,0 +1,90 @@
++using System.Text.Json;
++using Ray.BiliBiliTool.Application.Contracts;
++using Ray.BiliBiliTool.Domain;
++
++namespace Ray.BiliBiliTool.Infrastructure;
++
++// Opt-in Console result sink. Messages and credentials are deliberately excluded.
++public sealed class ConsoleTaskResult : ITaskRecordWriter
++{
++    private sealed record Failure(string Code, string Stage);
++    private sealed class Row
++    {
++        public string Account { get; set; } = "0";
++        public string Status { get; set; } = "success";
++        public List<Failure> Issues { get; } = [];
++        public List<string> Passed { get; } = [];
++        public List<string> Warnings { get; } = [];
++    }
++    private static readonly Dictionary<string, Row> Rows = [];
++    private static readonly List<object> GlobalIssues = [];
++    private static readonly AsyncLocal<Row?> Current = new();
++    private static readonly AsyncLocal<string?> StageValue = new();
++    private static readonly string? ResultPath = Environment.GetEnvironmentVariable("TASK_GUARD_RESULT_PATH");
++    private static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
++    public static bool Active => !string.IsNullOrEmpty(ResultPath);
++    public static void Begin(string uid)
++    {
++        if (!Active) return;
++        var row = new Row { Account = uid };
++        Rows[uid] = row;
++        Current.Value = row;
++        StageValue.Value = "login";
++        Save(false);
++    }
++    public static void Stage(string stage) { if (Active) StageValue.Value = stage; }
++    public static void Pass(string stage)
++    {
++        if (Current.Value is {} row && row.Issues.All(i => i.Stage != stage) && !row.Passed.Contains(stage)) row.Passed.Add(stage);
++        Save(false);
++    }
++    public static void Warn(string code)
++    {
++        if (Current.Value is {} row && !row.Warnings.Contains(code)) row.Warnings.Add(code);
++        Save(false);
++    }
++    public static void Fail(string? code = null, string? stage = null)
++    {
++        if (!Active || Current.Value is not {} row) return;
++        stage ??= StageValue.Value ?? "daily";
++        code ??= stage switch { "login" => "LOGIN_FAILED", "watch" => "WATCH_FAILED", "donate" => "DONATE_FAILED", _ => "DAILY_FAILED" };
++        row.Status = "failed";
++        var item = new Failure(code, stage);
++        if (!row.Issues.Contains(item)) row.Issues.Add(item);
++        row.Passed.Remove(stage);
++        Save(false);
++    }
++    private static void Save(bool complete)
++    {
++        if (!Active) return;
++        Directory.CreateDirectory(Path.GetDirectoryName(ResultPath!)!);
++        var json = JsonSerializer.Serialize(new { Version = 1, Complete = complete,
++            RunId = Environment.GetEnvironmentVariable("TASK_GUARD_RUN_ID"), Accounts = Rows.Values, Issues = GlobalIssues }, Options);
++        File.WriteAllText(ResultPath + ".tmp", json);
++        File.Move(ResultPath + ".tmp", ResultPath!, true);
++    }
++    public static int Finish()
++    {
++        if (!Active) return 0;
++        Save(true);
++        int failures = Rows.Values.Count(r => r.Status == "failed");
++        int code = GlobalIssues.Count > 0 || Rows.Count == 0 || failures == Rows.Count ? 1 : failures > 0 ? 2 : 0;
++        System.Console.WriteLine($"[每日升级结果] 账号 {Rows.Count}，失败 {failures}，退出码 {code}");
++        return code;
++    }
++    public static void Fatal()
++    {
++        GlobalIssues.Add(new { Code = Rows.Count == 0 ? "CONFIG_INVALID" : "UNCAUGHT_EXCEPTION", Stage = "startup" });
++        Save(true);
++    }
++    public Task WriteAsync(long userId, string taskKey, string? taskItemKey, TaskRecordStatus status,
++        string? message, TaskRecordTrigger trigger, CancellationToken cancellationToken = default)
++    {
++        if (taskKey == "DailyTaskAppService" && Current.Value is {} row)
++        {
++            if (status == TaskRecordStatus.Failed && row.Issues.Count == 0) Fail();
++            Save(false);
++        }
++        return Task.CompletedTask;
++    }
++}
+--- /dev/null
++++ b/test/Ray.BiliBiliTool.DomainService.UnitTests/StructuredTaskResultTests.cs
+@@ -0,0 +1,78 @@
++using System.Reflection;
++using System.Text.Json;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.Extensions.Options;
++using Ray.BiliBiliTool.Agent;
++using Ray.BiliBiliTool.Agent.BiliBiliAgent.Dtos;
++using Ray.BiliBiliTool.Agent.BiliBiliAgent.Dtos.ApiApi.Video;
++using Ray.BiliBiliTool.Agent.BiliBiliAgent.Interfaces;
++using Ray.BiliBiliTool.Config.Options;
++using Ray.BiliBiliTool.DomainService;
++using Ray.BiliBiliTool.DomainService.Dtos;
++using Ray.BiliBiliTool.DomainService.Interfaces;
++using Ray.BiliBiliTool.Infrastructure;
++
++namespace Ray.BiliBiliTool.DomainService.UnitTests;
++
++public class StructuredTaskResultTests
++{
++    [Fact]
++    public async Task MockedInterfaces_ProduceFailuresAndWarningsWithoutRealInteractions()
++    {
++        string dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
++        Directory.CreateDirectory(dir);
++        string file = Path.Combine(dir, "result.json");
++        Environment.SetEnvironmentVariable("TASK_GUARD_RESULT_PATH", file);
++        Assert.Equal(1, ConsoleTaskResult.Finish());
++        var ck = new BiliCookie(new Dictionary<string, string> { ["DedeUserID"] = "1", ["SESSDATA"] = "synthetic", ["bili_jct"] = "synthetic" });
++        var video = new VideoInfoDto { Aid = "123", Bvid = "BV1test", Title = "synthetic", Cid = 1, Duration = 15 };
++        foreach (var (uid, code, method) in new[] { ("1", -403, "share"), ("2", -412, "share"), ("3", -400, "watch") })
++        {
++            ConsoleTaskResult.Begin(uid);
++            var api = Proxy<IApiApi>.Make((_, _) => Task.FromResult(new BiliApiResponse { Code = code }));
++            var service = new VideoDomainService(NullLogger<VideoDomainService>.Instance, new OptionsMonitor<DailyTaskOptions>(new()), api);
++            if (method == "share") await service.ShareVideo(video, ck);
++            else await service.WatchVideo(video, ck);
++        }
++        foreach (var (uid, balance, failQuery) in new[] { ("4", 0m, false), ("5", 3m, false), ("6", 10m, true) })
++        {
++            ConsoleTaskResult.Begin(uid);
++            var coin = Proxy<ICoinDomainService>.Make((method, _) => method == "GetDonatedCoins"
++                ? failQuery ? Task.FromException<int>(new InvalidOperationException("synthetic")) : Task.FromResult(0)
++                : method == "GetCoinBalance" ? Task.FromResult(balance) : throw new Exception("Unexpected mock API"));
++            var service = new DonateCoinDomainService(NullLogger<DonateCoinDomainService>.Instance,
++                new OptionsMonitor<DailyTaskOptions>(new() { NumberOfCoins = 5, NumberOfProtectedCoins = 5 }), null!, coin, null!, null!);
++            await service.AddCoinsForVideos(ck);
++        }
++        ConsoleTaskResult.Begin("7");
++        ConsoleTaskResult.Fail("WATCH_FAILED", "watch");
++        ConsoleTaskResult.Pass("donate");
++        Assert.Equal(2, ConsoleTaskResult.Finish());
++        using var json = JsonDocument.Parse(File.ReadAllText(file));
++        var rows = json.RootElement.GetProperty("accounts").EnumerateArray().ToDictionary(r => r.GetProperty("account").GetString()!);
++        foreach (string uid in new[] { "1", "4", "5" }) Assert.Equal("success", rows[uid].GetProperty("status").GetString());
++        foreach (string uid in new[] { "2", "3", "6" }) Assert.Equal("failed", rows[uid].GetProperty("status").GetString());
++        Assert.Contains(rows["7"].GetProperty("passed").EnumerateArray(), p => p.GetString() == "donate");
++        Assert.Contains("SHARE_RESTRICTED", File.ReadAllText(file));
++        Assert.Contains("DONATE_FAILED", File.ReadAllText(file));
++        Assert.DoesNotContain("synthetic", File.ReadAllText(file));
++        Directory.Delete(dir, true);
++    }
++    public class Proxy<T> : DispatchProxy where T : class
++    {
++        public Func<string, object?[]?, object?> Handler = null!;
++        public static T Make(Func<string, object?[]?, object?> handler)
++        {
++            var result = Create<T, Proxy<T>>();
++            ((Proxy<T>)(object)result).Handler = handler;
++            return result;
++        }
++        protected override object? Invoke(MethodInfo? method, object?[]? args) => Handler(method!.Name, args);
++    }
++    private class OptionsMonitor<T>(T value) : IOptionsMonitor<T>
++    {
++        public T CurrentValue => value;
++        public T Get(string? name) => value;
++        public IDisposable? OnChange(Action<T, string?> listener) => null;
++    }
++}
