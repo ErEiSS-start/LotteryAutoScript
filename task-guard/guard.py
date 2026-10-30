@@ -31,6 +31,7 @@ MESSAGES = {
     'UNCAUGHT_EXCEPTION': '未处理的程序异常', 'START_FAILED': '任务启动失败',
     'METRICS_SYNC_FAILED': '统计同步连续三次失败',
     'PARTICIPATION_LOW': '参与量连续零参与或明显下降',
+    'WINS_IMPORT_FAILED': '中奖记录导入未完成，已保留原始记录',
     'METRICS_INCOMPLETE': '参与量统计记录不完整',
 }
 
@@ -156,6 +157,9 @@ def run_task(root, cfg, task, command):
     atomic(state_path, state)
     env = os.environ.copy()
     env.update(TASK_GUARD_RESULT_PATH=str(result_path), TASK_GUARD_RUN_ID=run_id, TASK_GUARD_TASK_KEY=task)
+    if cfg.get('wins_enabled') and task == 'check':
+        env.update(TASK_WINS_FILE=str(root / 'wins/journal' / (run_id + '.jsonl')),
+                   TASK_WINS_ACTIVE=str(root / 'wins/active.json'), TASK_WINS_CONFIG=str(root / 'wins/config.json'))
     if cfg.get('metrics_enabled') and task == 'start':
         state['metrics_enabled'] = True
         atomic(state_path, state)
@@ -287,8 +291,16 @@ def push(data, title, body):
 
 
 def drain(c, data, now, sender=push):
-    for row in c.execute('select * from outbox where sent is null and due<=? order by created limit 10', (now,)).fetchall():
+    for row in c.execute("select * from outbox where sent is null and due<=? order by case when kind in ('failure','recovery') then 0 else 1 end,created limit 10", (now,)).fetchall():
         p = json.loads(row['payload'])
+        if row['kind'] == 'wins':
+            import wins
+            eligibility = wins.before_send(c, p, now)
+            if eligibility == 'defer':
+                c.execute('update outbox set due=? where id=?',(now+60,row['id']));c.commit();continue
+            if not eligibility:
+                c.execute('update outbox set sent=?,kind=? where id=?', (now, 'wins_cancelled', row['id']))
+                c.commit(); continue
         # Do not send a delayed failure after it has already disappeared.
         if row['kind'] == 'failure':
             p['items'] = [i for i in p['items'] if c.execute(
@@ -315,6 +327,7 @@ def drain(c, data, now, sender=push):
             sent = False
         if sent:
             c.execute('update outbox set sent=? where id=?', (now, row['id']))
+            if row['kind'] == 'wins': wins.delivered(c, p, now)
             if row['kind'] == 'failure':
                 for i in p['items']:
                     c.execute('update faults set notified=1 where task=? and account=? and stage=? and code=?',
@@ -468,6 +481,18 @@ def watch(root, cfg, now=None, sender=push):
                 if state['status'] != 'running':
                     atomic(path, outcome)
                 ingest(c, outcome, now)
+        if cfg.get('wins_enabled'):
+            try:
+                import wins
+                imported=wins.tick(root, cfg, c, now)
+                if imported and c.execute("select 1 from faults where task='wins_collection' and active=1").fetchone():
+                    ingest(c, dict(run_id='wins-import-ok-' + str(int(now)), task='wins_collection', status='success',
+                           server=cfg['server'], issues=[], accounts=[]), now)
+            except (ValueError, OSError, sqlite3.Error, subprocess.SubprocessError):
+                c.rollback()
+                c.execute('insert or replace into winner_sync values(?,?,?)',(cfg['server'],now,'导入未完成'))
+                ingest(c, dict(run_id='wins-import-' + str(int(now)), task='wins_collection', status='failed',
+                       server=cfg['server'], issues=[issue('WINS_IMPORT_FAILED', 'collection')], accounts=[]), now)
         drain(c, root.parent, now, sender)
         c.close()
 

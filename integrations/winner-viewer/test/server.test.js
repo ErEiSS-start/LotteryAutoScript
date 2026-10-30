@@ -1,0 +1,408 @@
+'use strict';
+
+const assert = require('assert');
+const fs = require('fs');
+const http = require('http');
+const os = require('os');
+const path = require('path');
+const {
+    createLoginLimiter,
+    createLogServer,
+    createSessionValue,
+    validSessionValue,
+} = require('../server');
+const { createProfileResolver } = require('../profile-resolver');
+
+let sessionCookie = '';
+
+async function request(baseUrl, pathname, authenticated = true, options = {}) {
+    return fetch(`${baseUrl}${pathname}`, {
+        ...options,
+        headers: {
+            ...(authenticated && sessionCookie ? { Cookie: sessionCookie } : {}),
+            ...(options.headers || {}),
+        },
+    });
+}
+
+function winAction(baseUrl, action, body, actionHeader = true) {
+    return request(baseUrl, `/api/wins/${action}`, true, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(actionHeader ? { 'X-QLV-Action': '1' } : {}),
+        },
+        body: JSON.stringify(body),
+    });
+}
+
+(async () => {
+    const fixedSession = createSessionValue('secret', 2000, () => Buffer.alloc(18, 1));
+    assert.strictEqual(validSessionValue(fixedSession, 'secret', 1000), true);
+    assert.strictEqual(validSessionValue(fixedSession, 'secret', 2001), false);
+    assert.strictEqual(validSessionValue(`${fixedSession}x`, 'secret', 1000), false);
+    let limiterNow = 1000;
+    const limiter = createLoginLimiter({ now: () => limiterNow, maxFailures: 2, blockMs: 5000 });
+    assert.strictEqual(limiter.allowed('client'), true);
+    limiter.fail('client');
+    limiter.fail('client');
+    assert.strictEqual(limiter.allowed('client'), false);
+    limiterNow += 5001;
+    assert.strictEqual(limiter.allowed('client'), true);
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ql-log-viewer-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ql-log-outside-'));
+    const procRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ql-log-proc-'));
+    const lotteryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ql-lottery-'));
+    const lotteryInfo = path.join(lotteryRoot, 'lottery_info');
+    const winStateFile = path.join(lotteryRoot, 'web_state', 'dismissed-wins.json');
+    const accountRegistryFile = path.join(lotteryRoot, 'web_state', 'local-accounts.json');
+    fs.mkdirSync(lotteryInfo);
+    fs.mkdirSync(path.dirname(accountRegistryFile));
+    let profileRequests = 0;
+    const profileResolver = createProfileResolver({
+        cacheFile: path.join(lotteryRoot, 'web_state', 'test-profile-cache.json'),
+        fetchName: async uid => {
+            profileRequests += 1;
+            return uid === '1090063081' ? '_AQWQA_' : '哔哩哔哩智能机';
+        },
+    });
+    let resolvedProfiles = await profileResolver.resolveMany(['1090063081', '12076317']);
+    assert.strictEqual(resolvedProfiles['1090063081'], '_AQWQA_');
+    assert.strictEqual(profileRequests, 2);
+    resolvedProfiles = await profileResolver.resolveMany(['1090063081', '12076317']);
+    assert.strictEqual(profileRequests, 2, '昵称应从长期缓存读取，不应重复访问公开接口');
+    let releaseSlowProfile;
+    const slowProfileResolver = createProfileResolver({
+        cacheFile: path.join(lotteryRoot, 'web_state', 'slow-profile-cache.json'),
+        fetchName: () => new Promise(resolve => { releaseSlowProfile = resolve; }),
+    });
+    assert.deepStrictEqual(await slowProfileResolver.cachedMany(['10001']), {});
+    const slowRefresh = slowProfileResolver.refreshMany(['10001']);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.deepStrictEqual(await slowProfileResolver.cachedMany(['10001']), {}, '后台查询不得阻塞缓存读取');
+    releaseSlowProfile('后台昵称');
+    await slowRefresh;
+    assert.strictEqual((await slowProfileResolver.cachedMany(['10001']))['10001'], '后台昵称');
+    let boundedRequests = 0;
+    const boundedResolver = createProfileResolver({
+        cacheFile: path.join(lotteryRoot, 'web_state', 'bounded-profile-cache.json'),
+        fetchName: async uid => {
+            boundedRequests += 1;
+            return `昵称${uid}`;
+        },
+    });
+    await boundedResolver.refreshMany(Array.from({ length: 20 }, (_, index) => String(20000 + index)));
+    assert.strictEqual(boundedRequests, 8, '每轮后台昵称刷新最多请求8个UID');
+    const winRecord = {
+        id: '0123456789abcdef01234567',
+        accountUid: '1090063081',
+        accountNumber: 1,
+        talkerId: '12076317',
+        senderUid: '12076317',
+        messageSequence: '9001',
+        messageTimestamp: 1722470400,
+        content: '【有奖调研】请填写问卷，后续发放奖品。完整私信正文。',
+        link: 'https://message.bilibili.com/#/whisper/mid12076317',
+        status: 'pending',
+        detectedAt: 1785540000000,
+        lastNotifiedAt: 1785541800000,
+        notifyCount: 5,
+    };
+    fs.writeFileSync(path.join(lotteryInfo, 'pending_wins_1090063081.json'), JSON.stringify({
+        version: 1,
+        accountUid: '1090063081',
+        accountNumber: 1,
+        records: [winRecord],
+    }));
+    fs.writeFileSync(accountRegistryFile, JSON.stringify({
+        version: 1,
+        updatedAt: Date.now(),
+        accounts: [{ uid: '1090063081', number: 1 }],
+    }));
+    fs.writeFileSync(path.join(lotteryInfo, 'pending_wins_20002.json'), JSON.stringify({
+        version: 1,
+        accountUid: '20002',
+        accountNumber: 2,
+        records: [{ ...winRecord, id: '1123456789abcdef01234567', accountUid: '20002', accountNumber: 2 }],
+    }));
+    fs.writeFileSync(winStateFile, JSON.stringify({
+        version: 1,
+        records: [{
+            accountUid: '99999',
+            recordId: 'abcdef0123456789abcdef01',
+            dismissedAt: Date.now(),
+        }],
+    }));
+    fs.mkdirSync(path.join(root, 'task'));
+    fs.writeFileSync(
+        path.join(root, 'task', 'large.log'),
+        `${'普通日志\n'.repeat(5000)}[Warn] 412 风控\n最后一行\n`,
+    );
+    fs.writeFileSync(path.join(root, 'task', 'abort.log'), 'ordinary line\n'.repeat(800000));
+    fs.writeFileSync(path.join(outside, 'secret.log'), 'secret');
+    fs.symlinkSync(path.join(outside, 'secret.log'), path.join(root, 'escape.log'));
+
+    const startDirectory = path.join(root, 'LotteryAutoScript_start');
+    const checkDirectory = path.join(root, 'LotteryAutoScript_check');
+    fs.mkdirSync(startDirectory);
+    fs.mkdirSync(checkDirectory);
+    ['old.log', 'current-a.log', 'current-b.log'].forEach((name, index) => {
+        const filename = path.join(startDirectory, name);
+        fs.writeFileSync(filename, name);
+        fs.utimesSync(filename, 1000 + index, 1000 + index);
+    });
+    fs.writeFileSync(path.join(checkDirectory, 'current.log'), 'checking');
+
+    function addProcess(pid, task) {
+        const processDirectory = path.join(procRoot, String(pid));
+        fs.mkdirSync(processDirectory);
+        fs.writeFileSync(
+            path.join(processDirectory, 'cmdline'),
+            Buffer.from(`bash\0/usr/local/bin/task\0${task}.sh\0`),
+        );
+    }
+    addProcess(41001, 'LotteryAutoScript_start');
+    addProcess(41002, 'LotteryAutoScript_start');
+    addProcess(41003, 'LotteryAutoScript_check');
+
+    let searchAbortCount = 0;
+    const server = createLogServer({
+        logRoot: root,
+        token: 'test-token',
+        procRoot,
+        runtimeCacheMs: 0,
+        lotteryRoot,
+        winStateFile,
+        accountRegistryFile,
+        viewerInstance: '测试服务器',
+        peerViewerUrl: 'https://peer.example/log-viewer/',
+        winnerViewerUrl: 'https://viewer.example/winner-reminders/',
+        peerWinnerUrl: 'https://viewer.example/winner-reminders-2/',
+        logViewerUrl: 'https://viewer.example/log-viewer/',
+        profileResolver,
+        onSearchAbort: () => { searchAbortCount += 1; },
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+    let response = await request(baseUrl, '/api/list', false);
+    assert.strictEqual(response.status, 401);
+
+    response = await request(baseUrl, '/', false);
+    assert.strictEqual(response.status, 200);
+    assert.match(await response.text(), /id="loginForm"/);
+
+    response = await request(baseUrl, '/api/list', false, {
+        headers: { Authorization: `Basic ${Buffer.from('logs:test-token').toString('base64')}` },
+    });
+    assert.strictEqual(response.status, 401, '旧 Basic Auth 不应绕过新登录页');
+
+    response = await request(baseUrl, '/api/login', false, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'logs', password: 'wrong-token' }),
+    });
+    assert.strictEqual(response.status, 401);
+
+    response = await request(baseUrl, '/api/login', false, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'logs', password: 'test-token' }),
+    });
+    assert.strictEqual(response.status, 200);
+    const setCookie = response.headers.get('set-cookie');
+    assert.match(setCookie, /HttpOnly/);
+    assert.match(setCookie, /Secure/);
+    assert.match(setCookie, /SameSite=Strict/);
+    assert.match(setCookie, /Path=\/log-viewer/);
+    assert.match(setCookie, /Path=\/log-viewer-2/);
+    assert.match(setCookie, /Path=\/winner-reminders/);
+    assert.match(setCookie, /Path=\/winner-reminders-2/);
+    sessionCookie = `qlv_session=${setCookie.match(/qlv_session=([^;]+)/)[1]}`;
+
+    response = await request(baseUrl, '/api/list');
+    let payload = await response.json();
+    assert.strictEqual(response.status, 200);
+    assert.ok(payload.entries.some(entry => entry.name === 'task'));
+    assert.strictEqual(payload.entries.find(entry => entry.name === 'LotteryAutoScript_start').running, true);
+    assert.strictEqual(payload.entries.find(entry => entry.name === 'LotteryAutoScript_check').running, true);
+
+    response = await request(baseUrl, '/', true, { headers: { 'X-Viewer-Mode': 'winners' } });
+    assert.strictEqual(response.status, 200);
+    assert.match(await response.text(), /id="winsList"/);
+
+    response = await request(baseUrl, '/api/config');
+    payload = await response.json();
+    assert.strictEqual(payload.winnerViewerUrl, 'https://viewer.example/winner-reminders/');
+    assert.match(response.headers.get('set-cookie'), /Path=\/winner-reminders/);
+
+    response = await request(baseUrl, '/api/list?path=LotteryAutoScript_start');
+    payload = await response.json();
+    assert.strictEqual(response.status, 200);
+    assert.deepStrictEqual(
+        payload.entries.filter(entry => entry.running).map(entry => entry.name),
+        ['current-b.log', 'current-a.log'],
+    );
+
+    fs.rmSync(path.join(procRoot, '41001'), { recursive: true, force: true });
+    fs.rmSync(path.join(procRoot, '41002'), { recursive: true, force: true });
+    response = await request(baseUrl, '/api/list');
+    payload = await response.json();
+    assert.strictEqual(payload.entries.find(entry => entry.name === 'LotteryAutoScript_start').running, false);
+    assert.strictEqual(payload.entries.find(entry => entry.name === 'LotteryAutoScript_check').running, true);
+
+    response = await request(baseUrl, '/api/chunk?path=task%2Flarge.log&limit=16384');
+    payload = await response.json();
+    assert.strictEqual(response.status, 200);
+    assert.ok(payload.start > 0);
+    assert.ok(payload.text.includes('最后一行'));
+    assert.ok(Buffer.byteLength(payload.text) < fs.statSync(path.join(root, 'task', 'large.log')).size);
+
+    response = await request(baseUrl, '/api/search?path=task%2Flarge.log&q=412');
+    payload = await response.json();
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(payload.matches.length, 1);
+    assert.match(payload.matches[0].text, /风控/);
+
+    response = await request(baseUrl, '/api/search?path=task%2Flarge.log&q=%E6%99%AE%E9%80%9A%E6%97%A5%E5%BF%97&limit=10');
+    payload = await response.json();
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(payload.matches.length, 10);
+    assert.strictEqual(payload.limited, true);
+
+    await new Promise(resolve => {
+        const aborted = http.request(`${baseUrl}/api/search?path=task%2Fabort.log&q=never-matches`, {
+            headers: { Cookie: sessionCookie },
+        });
+        aborted.on('error', resolve);
+        aborted.on('close', resolve);
+        aborted.end();
+        setTimeout(() => aborted.destroy(), 10);
+    });
+    for (let index = 0; index < 20 && searchAbortCount === 0; index += 1) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.strictEqual(searchAbortCount, 1, '客户端取消搜索后服务端应立即停止读取');
+    response = await request(baseUrl, '/health');
+    assert.strictEqual(response.status, 200, '取消搜索不得影响后续请求');
+
+    response = await request(baseUrl, '/api/wins?status=pending');
+    payload = await response.json();
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(payload.instance, '测试服务器');
+    assert.strictEqual(payload.peerViewerUrl, 'https://peer.example/log-viewer/');
+    assert.strictEqual(payload.counts.pending, 1);
+    assert.deepStrictEqual(payload.warnings, []);
+    assert.strictEqual(payload.records.some(record => record.accountUid === '20002'), false, '不得显示非本机帐号记录');
+    assert.strictEqual(payload.records[0].content, winRecord.content, '登录后应返回完整私信正文');
+    assert.strictEqual(payload.records[0].accountName, '_AQWQA_');
+    assert.strictEqual(payload.records[0].senderName, '哔哩哔哩智能机');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(winStateFile, 'utf8')).records, [], '应清理失去对应中奖记录的账本条目');
+
+    fs.writeFileSync(path.join(lotteryInfo, 'pending_wins_30003.json'), '{broken-json');
+    response = await request(baseUrl, '/api/wins?status=pending');
+    payload = await response.json();
+    assert.strictEqual(payload.counts.pending, 1);
+    assert.ok(payload.warnings.some(warning => warning.includes('pending_wins_30003.json')));
+
+    fs.renameSync(accountRegistryFile, `${accountRegistryFile}.bak`);
+    response = await request(baseUrl, '/api/wins?status=pending');
+    payload = await response.json();
+    assert.strictEqual(payload.counts.pending, 2, '帐号清单缺失时应兼容显示历史记录');
+    assert.ok(payload.warnings.some(warning => warning.includes('尚未生成')));
+    fs.renameSync(`${accountRegistryFile}.bak`, accountRegistryFile);
+    const validRegistry = fs.readFileSync(accountRegistryFile, 'utf8');
+    fs.writeFileSync(accountRegistryFile, JSON.stringify({ version: 1, accounts: [] }));
+    response = await request(baseUrl, '/api/wins?status=pending');
+    payload = await response.json();
+    assert.strictEqual(payload.counts.pending, 2, '空的损坏帐号清单不得隐藏中奖记录');
+    assert.ok(payload.warnings.some(warning => warning.includes('没有有效UID')));
+    fs.writeFileSync(accountRegistryFile, validRegistry);
+
+    response = await winAction(baseUrl, 'dismiss', {
+        accountUid: winRecord.accountUid,
+        recordId: winRecord.id,
+    }, false);
+    assert.strictEqual(response.status, 403, '写操作必须带显式操作标头');
+
+    response = await winAction(baseUrl, 'dismiss', {
+        accountUid: winRecord.accountUid,
+        recordId: winRecord.id,
+    });
+    assert.strictEqual(response.status, 200);
+    const ledger = JSON.parse(fs.readFileSync(winStateFile, 'utf8'));
+    assert.strictEqual(ledger.records.length, 1);
+    assert.strictEqual(ledger.records[0].accountUid, winRecord.accountUid);
+
+    response = await request(baseUrl, '/api/wins?status=pending');
+    payload = await response.json();
+    assert.strictEqual(payload.counts.pending, 0);
+    assert.strictEqual(payload.counts.dismissed, 1);
+    assert.strictEqual(payload.records.length, 0);
+
+    response = await request(baseUrl, '/api/wins?status=dismissed');
+    payload = await response.json();
+    assert.strictEqual(payload.records[0].status, 'dismissed');
+
+    response = await winAction(baseUrl, 'restore', {
+        accountUid: winRecord.accountUid,
+        recordId: winRecord.id,
+    });
+    assert.strictEqual(response.status, 200);
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(winStateFile, 'utf8')).records, []);
+
+    fs.writeFileSync(winStateFile, '{broken-ledger');
+    response = await request(baseUrl, '/api/wins?status=pending');
+    payload = await response.json();
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(payload.counts.pending, 1, '账本损坏时应按未取消显示，避免漏报');
+    assert.ok(payload.warnings.some(warning => warning.includes('取消提醒账本读取失败')));
+    fs.writeFileSync(winStateFile, JSON.stringify({ version: 1, records: [] }));
+
+    response = await winAction(baseUrl, 'dismiss', {
+        accountUid: '../../etc',
+        recordId: winRecord.id,
+    });
+    assert.strictEqual(response.status, 400);
+
+    response = await request(baseUrl, '/api/meta?path=..%2Fsecret.log');
+    assert.strictEqual(response.status, 403);
+
+    response = await request(baseUrl, '/api/meta?path=escape.log');
+    assert.strictEqual(response.status, 403);
+
+    response = await request(baseUrl, '/api/logout', true, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+    });
+    assert.strictEqual(response.status, 200);
+    assert.match(response.headers.get('set-cookie'), /Max-Age=0/);
+
+    const forwarded=[];
+    const unified=createLogServer({logRoot:root,token:'test-token',lotteryRoot,profileResolver,
+        winnerGateway:async body=>{forwarded.push(body);return body.method==='list'
+            ? {records:[],counts:{pending:0,review:0,dismissed:0,reservation:0},warnings:['模拟远端数据过期'],options:{server:['TEST']}}
+            : {ok:true,record:{status:'pending'}};}});
+    await new Promise(resolve=>unified.listen(0,'127.0.0.1',resolve));
+    const unifiedUrl=`http://127.0.0.1:${unified.address().port}`;
+    sessionCookie=`qlv_session=${createSessionValue('test-token',Date.now()+60000)}`;
+    response=await request(unifiedUrl,'/api/wins',false);assert.strictEqual(response.status,401);assert.strictEqual(forwarded.length,0);
+    response=await request(unifiedUrl,'/api/wins?owner=朋友&server=TEST');payload=await response.json();
+    assert.strictEqual(response.status,200);assert.strictEqual(payload.instance,'三台服务器');assert.strictEqual(forwarded[0].owner,'朋友');assert(payload.warnings.length);
+    response=await winAction(unifiedUrl,'confirm',{accountUid:'10001',recordId:'a'.repeat(24)},false);assert.strictEqual(response.status,403);
+    response=await winAction(unifiedUrl,'confirm',{accountUid:'10001',recordId:'a'.repeat(24),operationId:'operation-000000000'});assert.strictEqual(response.status,200);
+    assert.strictEqual(forwarded[1].action,'confirm');assert.strictEqual(forwarded[1].operationId,'operation-000000000');
+    await new Promise(resolve=>unified.close(resolve));
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+    fs.rmSync(procRoot, { recursive: true, force: true });
+    fs.rmSync(lotteryRoot, { recursive: true, force: true });
+    console.log('server tests passed');
+})().catch(error => {
+    console.error(error);
+    process.exit(1);
+});

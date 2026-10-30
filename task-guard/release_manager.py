@@ -25,7 +25,8 @@ TESTS = ['task-guard/test_lottery.cjs', 'task-guard/test_metrics.cjs',
          'test/alert_reading_regression.test.js', 'test/article.test.js',
          'test/check_notification.test.js', 'test/pending_win_store.test.js',
          'test/env_merge.test.js', 'test/shared_state_permission.test.js']
-TOOLS = ['release_manager.py', 'guard.py', 'metrics.py']
+TESTS += ['test/winner_v4.test.js', 'integrations/winner-viewer/test/server.test.js']
+TOOLS = ['release_manager.py', 'guard.py', 'metrics.py', 'wins.py', 'wins_deploy.py']
 
 def digest(p):
     h = hashlib.sha256()
@@ -71,9 +72,12 @@ def verify(directory, release_id=None):
         bad = sorted(k for k in set(actual) | set(m['files']) if actual.get(k) != m['files'].get(k))
         raise ValueError('Release file mismatch: ' + ', '.join(bad[:10]))
     for required in ['lottery/main.js', 'lottery/node_modules/got/package.json',
-                     'bili/Ray.BiliBiliTool.Console.dll', *['tools/' + p for p in TOOLS]]:
+                     'bili/Ray.BiliBiliTool.Console.dll', *['tools/' + p for p in TOOLS[:3]]]:
         if required not in actual: raise ValueError('Missing component: ' + required)
     if not m.get('tests', {}).get('passed'): raise ValueError('Offline tests have not passed')
+    if m.get('features',{}).get('wins'):
+        for required in ['tools/wins.py','tools/wins_deploy.py','viewer/server.js','viewer/gateway.js','viewer/public/wins.js']:
+            if required not in actual:raise ValueError('Missing winner component: '+required)
     return m
 
 def scan_secrets(directory):
@@ -105,12 +109,14 @@ def build(a):
         shutil.copytree(a.node_modules, lottery / 'node_modules', symlinks=False)
         tools = payload / 'tools'; tools.mkdir()
         for name in TOOLS: shutil.copy2(source / 'task-guard' / name, tools / name)
+        shutil.copytree(source / 'integrations/winner-viewer', payload / 'viewer')
         for target in [source / 'test', source / 'task-guard']:
             dest = stage / target.name
             shutil.copytree(target, dest, ignore=shutil.ignore_patterns('__pycache__'))
         # Offline tests use a disposable copy, never production state.
         shutil.copytree(lottery, stage / 'test-source')
         for name in ['test', 'task-guard']: shutil.copytree(stage / name, stage / 'test-source' / name)
+        shutil.copytree(source / 'integrations', stage / 'test-source/integrations')
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
         for k in list(env):
             if k.startswith(('Ray_', 'TASK_')) or k in ['COOKIE', 'PUSH_PLUS_TOKEN', 'PUSH_PLUS_USER']: env.pop(k)
@@ -142,7 +148,7 @@ def build(a):
                 package = read(p)
                 if package.get('name') and package.get('version'): dependencies[str(p.parent.relative_to(lottery / 'node_modules'))] = package['version']
             except (ValueError, OSError): pass
-        m = dict(schema=1, release_id=release_id, git_commit=a.commit, bili_baseline=BASELINE,
+        m = dict(schema=1, release_id=release_id, git_commit=a.commit, bili_baseline=BASELINE, features={'wins': True},
                  bili_patch_sha256=digest(patch), package_lock_sha256=digest(lottery / 'package-lock.json'),
                  runtime=dict(node_min_major=18, python_min='3.11', dotnet_major=10, platform='linux', architecture='x86_64'),
                  dependencies=dependencies, tests=dict(passed=True, node=TESTS, python='test_*.py', bili='StructuredTaskResultTests'), files=files(payload))
@@ -213,6 +219,18 @@ def health(data, root, cfg):
         if not row or time.time() - float(json.loads(row[0])) > 180: raise ValueError('Statistics collector is stale')
         if c.execute('pragma quick_check').fetchone()[0] != 'ok': raise ValueError('Statistics database integrity failure')
     import pwd
+    winner=cfg.get('wins_enabled') and (root/'current/tools/wins.py').exists()
+    if winner:
+        hashes=read(root/'wins/runtime-hashes.json')
+        for path,value in hashes.items():
+            if digest(path)!=value:raise ValueError('Winner runtime entry drift: '+Path(path).name)
+        with sqlite3.connect('file:'+str(root/'monitor.sqlite')+'?mode=ro',uri=True) as c:
+            state=c.execute('select at,error from winner_sync where server=?',(cfg['server'],)).fetchone()
+            if not state or state[1] or time.time()-state[0]>180:raise ValueError('Winner collection is stale')
+        settings=read(root/'wins/config.json')
+        if settings.get('hub'):
+            run(['systemctl','is-active','--quiet','qinglong-wins-web.service'])
+            run(['systemctl','is-active','--quiet','qinglong-wins-hub.timer'])
     try: viewer = pwd.getpwnam('qinglong-log-viewer')
     except KeyError: return dict(timers=True, collector=True, viewer='not installed')
     paths = [data / 'scripts/LotteryAutoScript/web_state/local-accounts.json']
@@ -220,6 +238,10 @@ def health(data, root, cfg):
     for p in paths:
         run(['runuser', '-u', viewer.pw_name, '--', 'test', '-r', str(p)])
     run(['systemctl', 'is-active', '--quiet', 'qinglong-log-viewer.service'])
+    if winner and settings.get('hub'):
+        if run(['systemctl','show','qinglong-log-viewer.service','-p','NoNewPrivileges','--value']).strip()!='yes':raise ValueError('Viewer privilege protection changed')
+        script="require(process.argv[1]).createGateway(process.argv[2])({method:'list',status:'all'}).then(x=>{if(!Array.isArray(x.records))process.exit(1)}).catch(()=>process.exit(1))"
+        run(['runuser','-u',viewer.pw_name,'--','node','-e',script,str((root/'current/viewer/gateway.js').resolve()),'/run/qinglong-wins/gateway.sock'])
     return dict(timers=True, collector=True, viewer_readable=True)
 
 def shim(root, filename):
@@ -359,7 +381,12 @@ def deploy(a):
             switch(root, target)
             # Config remains outside the bundle. Change only release metadata.
             cfg.update(unified_release=a.release)
+            if read(target / 'release.json').get('features', {}).get('wins'):
+                cfg.update(wins_enabled=True)
+                cfg.setdefault('wins_installed_at', time.time())
             atomic(root / 'config.json', cfg)
+            if cfg.get('wins_enabled') and (target / 'tools/wins_deploy.py').exists():
+                run(['python3', target / 'tools/wins_deploy.py', 'enable', '--data', data, '--backup', backup])
             if configuration(data) != before: raise ValueError('Business configuration changed during deployment')
             healthy = health(data, root, cfg)
             verify(target, a.release)
@@ -374,6 +401,8 @@ def deploy(a):
             # Restore the predecessor's resolver format as well as its pointer.
             # Already running processes have loaded their own module bytes.
             restore_entries(backup, data, root)
+            if (backup / 'winner-runtime').exists():
+                run(['python3', target / 'tools/wins_deploy.py', 'restore', '--data', data, '--backup', backup])
             raise
         after_progress = progress(data)
         report = dict(server=cfg['server'], release=a.release, git_commit=read(target / 'release.json')['git_commit'],
@@ -420,6 +449,8 @@ def rollback(a):
         unchanged = configuration(data)
         switch(root, previous)
         restore_entries(backup, data, root)
+        if (backup / 'winner-runtime').exists():
+            run(['python3', active / 'tools/wins_deploy.py', 'restore', '--data', data, '--backup', backup])
         if (previous / 'release.json').exists(): cfg['unified_release'] = read(previous / 'release.json')['release_id']
         else: cfg.pop('unified_release', None)
         atomic(root / 'config.json', cfg)

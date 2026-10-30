@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f6f5f0">
+  <title>登录 · 中奖管理</title>
+  <link rel="stylesheet" href="./styles.css?v=20261030a">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <div class="login-intro">
+      <div class="winner-brand"><span class="brand-mark" aria-hidden="true">奖</span><span>中奖管理<small>PRIZE INBOX</small></span></div>
+      <div class="login-editorial"><p class="page-kicker">A LITTLE LUCK, WELL KEPT</p><h1>每一份好运，<br>都值得<span>收好。</span></h1><p>中奖消息、领取提醒与历史记录，<br>在这里，有条不紊。</p></div>
+      <div class="login-note"><span class="account-dot" aria-hidden="true"></span> 一个入口，三台服务器</div>
+    </div>
+    <section class="login-card" aria-labelledby="loginTitle">
+      <div class="login-card-heading"><p class="login-kicker">WELCOME BACK</p><h2 id="loginTitle">欢迎回来</h2><p class="login-description">登录后，即可查看和管理你的中奖消息。</p></div>
+      <form id="loginForm" class="login-form">
+        <label><span>用户名</span><input id="loginUsername" name="username" type="text" value="logs" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus></label>
+        <label><span>密码</span><input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="输入你的登录密码" required></label>
+        <button id="loginSubmit" type="submit">登录并保持登录 <span aria-hidden="true">→</span></button>
+      </form>
+      <p id="loginError" class="login-error" role="alert"></p>
+      <p class="login-security">一次登录，统一查看所有账号。<br>此浏览器会保持登录，直到你主动退出。</p>
+    </section>
+  </main>
+  <script src="./login.js?v=20261030a" defer></script>
+</body>
+</html>

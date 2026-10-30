@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f6f5f0">
+  <title>中奖管理 · 消息收件箱</title>
+  <link rel="stylesheet" href="./styles.css?v=20261030a">
+</head>
+<body class="winner-body">
+  <main class="winner-page-shell">
+    <header class="winner-topbar">
+      <a class="winner-brand" href="./" aria-label="中奖管理首页"><span class="brand-mark" aria-hidden="true">奖</span><span>中奖管理<small>PRIZE INBOX</small></span></a>
+      <div class="toolbar-actions">
+        <a id="logViewerLink" class="button-link quiet-link hidden" href="#">运行日志 ↗</a>
+        <button id="logoutViewer" class="quiet-button" type="button">退出登录</button>
+      </div>
+    </header>
+
+    <section class="winner-page-header" aria-labelledby="pageTitle">
+      <div class="winner-heading">
+        <p class="page-kicker"><span class="kicker-line" aria-hidden="true"></span> YOUR LUCK, ORGANIZED</p>
+        <h1 id="pageTitle">好消息，都在这里<span>。</span></h1>
+        <p class="page-description">三台服务器的中奖消息，收好每一份好运。</p>
+      </div>
+      <div class="account-panel">
+        <div class="account-current"><span class="account-dot" aria-hidden="true"></span><span id="viewerInstance">正在读取账号组</span><span class="account-caption">当前账号组</span></div>
+        <a id="peerWinnerLink" class="button-link account-switch hidden" href="#">切换账号组 <span aria-hidden="true">↗</span></a>
+      </div>
+    </section>
+
+    <section class="wins-filter" aria-label="中奖提醒筛选">
+      <button class="active" type="button" data-win-status="pending" aria-pressed="true"><span class="filter-label"><i class="filter-dot pending-dot" aria-hidden="true"></i>待处理</span><span class="filter-bottom"><span id="pendingCount" class="filter-count">0</span><span class="filter-caption">等待领取的好运</span></span></button>
+      <button type="button" data-win-status="review" aria-pressed="false"><span class="filter-label"><i class="filter-dot review-dot" aria-hidden="true"></i>待确认</span><span class="filter-bottom"><span id="reviewCount" class="filter-count">0</span><span class="filter-caption">需要你看一眼</span></span></button>
+      <button type="button" data-win-status="reservation" aria-pressed="false"><span class="filter-label"><i class="filter-dot archive-dot" aria-hidden="true"></i>参与／预约</span><span class="filter-bottom"><span id="reservationCount" class="filter-count">0</span><span class="filter-caption">参与确认，不计中奖</span></span></button>
+      <button type="button" data-win-status="dismissed" aria-pressed="false"><span class="filter-label"><i class="filter-dot archive-dot" aria-hidden="true"></i>已归档</span><span class="filter-bottom"><span id="dismissedCount" class="filter-count">0</span><span class="filter-caption">妥善保存的记录</span></span></button>
+    </section>
+
+    <div class="winner-selects" aria-label="账号与消息筛选">
+      <label>服务器<select id="serverFilter"><option value="">全部服务器</option></select></label>
+      <label>归属<select id="ownerFilter"><option value="">全部归属</option></select></label>
+      <label>账号<select id="accountFilter"><option value="">全部账号</option></select></label>
+      <label>类别<select id="categoryFilter"><option value="">全部类别</option><option value="winner">明确中奖</option><option value="review">疑似中奖</option><option value="reservation">参与／预约</option><option value="ignored">无关消息</option></select></label>
+    </div>
+    <div class="list-toolbar"><h2>消息收件箱 <span id="currentFilterLabel">/ 待处理</span></h2><div class="sync-actions"><span id="winSyncStatus" class="sync-status syncing" role="status">正在同步</span><button id="refreshWins" class="refresh-button" type="button" aria-label="刷新中奖消息"><span aria-hidden="true">↻</span> 刷新</button></div></div>
+    <section id="winsWarnings" class="wins-warnings hidden" role="alert"></section>
+    <section id="winsList" class="wins-list" aria-label="中奖消息列表" aria-live="polite"><div class="empty-state"><strong>正在整理你的好消息…</strong><span>马上就好</span></div></section>
+    <footer class="winner-page-footer"><span>只管理提醒，私信始终为你保留。</span><span>归档不会标记已读或删除 B 站私信。</span></footer>
+  </main>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="./wins.js?v=20261030-wins1" defer></script>
+</body>
+</html>
