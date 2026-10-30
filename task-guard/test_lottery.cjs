@@ -3,9 +3,9 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 const os = require('os');
-const sourceRoot = fs.existsSync(path.resolve(__dirname,'../main.js')) ? path.resolve(__dirname,'..')
+const sourceRoot = process.env.LOTTERY_SOURCE_ROOT || (fs.existsSync(path.resolve(__dirname,'../main.js')) ? path.resolve(__dirname,'..')
     : fs.existsSync(path.resolve(__dirname,'../lottery/main.js')) ? path.resolve(__dirname,'../lottery')
-        : path.join(__dirname,'releases/20261030-v1/lottery');
+        : path.join(__dirname,'releases/20261030-v1/lottery'));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'task-result-test-'));
 process.env.TASK_GUARD_RESULT_PATH = path.join(tmp, 'result.json');
 const reporterPath = path.join(sourceRoot,'lib/helper/task_result.js');
@@ -16,6 +16,7 @@ async function scenario(mode, failures, discovery = true, accounts = [1,2]) {
     const state = {};
     const config = { init(){}, updata(){}, enable_lottery_round_robin:true, lottery_discovery_mode:'collect', save_lottery_info_to_file:true };
     const context = {module:{exports:{}},require(name) {
+        if (name.includes('participation_metrics')) return { emit(){}, candidates(){} };
         if (name.includes('task_result')) return result;
         if (name === './lib/utils') return { log,delay:async()=>{},hasFileOrDir:()=>true,hasEnv:()=>false,printIpInfo(){},clearLotteryInfo:async()=>{} };
         if (name === './lib/helper/local_account_registry') return {writeLocalAccountRegistry:()=>[]};

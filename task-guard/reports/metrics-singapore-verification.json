@@ -1,0 +1,18 @@
+{
+  "server": "新加坡",
+  "checks": {
+    "env.js_unchanged": true,
+    "my_config.js_unchanged": true,
+    "enabled_envs_unchanged": true,
+    "cron_configuration_unchanged": true,
+    "business_snapshot_unchanged_at_deploy": true,
+    "original_failure_timer_active": true,
+    "new_collector_timer_active": true,
+    "metrics_enabled": true,
+    "collector_fresh": true,
+    "journal_integrity": true,
+    "release_has_metrics_entry": true
+  },
+  "source_digest": "e1d2a4202866b1f5f3efac4d665e8df3db76e19f3e5351bdbd938da40ec795c0",
+  "passed": true
+}

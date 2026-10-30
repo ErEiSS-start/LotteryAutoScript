@@ -1,0 +1,29 @@
+{
+  "feature": "daily_participation_monitoring",
+  "version": 1,
+  "rollout_order": ["wuhan", "singapore", "usa"],
+  "python_tests_passed": 23,
+  "lottery_offline_scenarios_passed": 12,
+  "node_journal_queue_resume_and_failure_isolation": "passed",
+  "ssh_restrictions": {
+    "source_address": "enforced",
+    "pinned_host_keys": "enforced",
+    "arbitrary_commands": "rejected",
+    "configuration_file_reads": "rejected",
+    "port_forwarding": "denied",
+    "pty": "denied"
+  },
+  "schedule": {
+    "timezone": "America/New_York",
+    "report_local_time": "09:00",
+    "collection_seconds": 60,
+    "synchronization_seconds": 300
+  },
+  "daily_report_idempotency": "passed",
+  "incremental_replay_and_database_reset": "passed",
+  "cross_midnight_and_dst_23_25_hours": "passed",
+  "zero_low_participation_and_single_recovery": "passed",
+  "push_delivery_tests": "mock_sender_only",
+  "business_actions_triggered_by_tests": false,
+  "production_credentials_or_account_identifiers_in_this_report": false
+}

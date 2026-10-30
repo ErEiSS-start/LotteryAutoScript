@@ -1,0 +1,52 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const os = require('os');
+const root = process.env.LOTTERY_SOURCE_ROOT || path.resolve(__dirname,'..');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(),'metrics-fixture-'));
+process.env.TASK_GUARD_TASK_KEY='start';
+process.env.TASK_GUARD_RUN_ID='fixture';
+process.env.TASK_METRICS_SERVER='TEST';
+process.env.TASK_METRICS_FILE=path.join(tmp,'events.jsonl');
+process.env.COOKIE='DedeUserID=123; SESSDATA=must-not-persist;';
+process.env.NUMBER='1';
+const metrics=require(path.join(root,'lib/helper/participation_metrics'));
+metrics.candidates([{dyid:'1'},{dyid:'1'},{dyid:'2'}],'fixture',false);
+metrics.emit('interaction',{dyid:'1',success:true});
+metrics.emit('interaction',{dyid:'2',success:false});
+let events=fs.readFileSync(process.env.TASK_METRICS_FILE,'utf8').trim().split('\n').map(JSON.parse);
+assert.equal(events.length,4);
+assert.equal(events[0].data.ids.length,2);
+assert.equal(new Set(events.map(e=>e.event_id)).size,4);
+assert(!JSON.stringify(events).includes('SESSDATA'));
+// Exercise the real queue transition methods with deterministic, isolated storage.
+const context={module:{exports:{}},process,require(name){
+    if(name==='../utils')return {lottery_info_dir:tmp,shuffle:items=>items};
+    if(name==='./participation_metrics')return metrics;
+    return require(name);
+}};
+vm.runInNewContext(fs.readFileSync(path.join(root,'lib/helper/round_robin_queue.js'),'utf8'),context);
+(async()=>{
+    fs.writeFileSync(path.join(tmp,'snapshot.json'),'{}');
+    const Queue=context.module.exports.RoundRobinQueue;
+    let builds=0;
+    const options={snapshotFilename:'snapshot.json',config:{},createCandidates:async()=>{builds++;return [{dyid:'1'},{dyid:'2'}];}};
+    const q=new Queue({account:1,directory:tmp});
+    await q.loadOrCreate(options);
+    assert(q.complete('1','successful'));
+    assert(!q.complete('1','successful'));
+    const resumed=new Queue({account:1,directory:tmp});
+    assert.equal((await resumed.loadOrCreate(options)).created,false);
+    assert.equal(builds,1);
+    resumed.defer('2');resumed.complete('2','skipped');
+    events=fs.readFileSync(process.env.TASK_METRICS_FILE,'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(events.filter(e=>e.type==='candidates').length,2,'Same queue/day must not rewrite all candidate IDs on every round');
+    assert.equal(events.filter(e=>e.type==='disposition').length,3);
+    assert.equal(events.filter(e=>e.type==='disposition').at(-1).data.remaining,0);
+    // A disk error cannot become a business exception or change business progress.
+    process.env.TASK_METRICS_FILE=tmp;
+    assert.doesNotThrow(()=>metrics.emit('interaction',{dyid:'3',success:true}));
+    fs.rmSync(tmp,{recursive:true});
+    console.log('Metrics journal, queue resume, outcomes, dedup and write-failure isolation passed (offline)');
+})().catch(error=>{console.error(error);process.exitCode=1;});

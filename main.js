@@ -12,6 +12,8 @@ const { HttpsProxyAgent } = require('https-proxy-agent');
 const request = require('https');
 const { writeLocalAccountRegistry } = require('./lib/helper/local_account_registry');
 const taskResult = require('./lib/helper/task_result');
+const participation = require('./lib/helper/participation_metrics');
+let accountSpan = 0;
 const metainfo = [
     '  _           _   _                   _____           _       _   ',
     ' | |         | | | |                 / ____|         (_)     | |  ',
@@ -63,6 +65,10 @@ function persistLocalAccountRegistry(accounts) {
  */
 async function runAccount(account, localhost) {
     setAccountEnv(account);
+    const span = String(++accountSpan);
+    const phase = process.env.LOTTERY_DISCOVERY_ONLY ? 'discovery' : 'participation';
+    participation.emit('account_begin', { span, phase });
+    let accountError;
     ck_flag = 0;
     if (account.PROXY_HOST) {
         printIpInfo(true);
@@ -75,12 +81,16 @@ async function runAccount(account, localhost) {
         request.globalAgent = localhost;
     }
     try {
-        return await main();
+        accountError = await main();
+        return accountError;
     } catch (error) {
+        accountError = true;
         taskResult.fail('ACCOUNT_EXCEPTION', process.env.lottery_mode || 'startup');
         log.error('帐号执行异常', '详情见本轮日志；继续其他帐号');
         return '帐号执行异常';
     } finally {
+        participation.emit('account_end', { span, phase,
+            status: accountError || taskResult.currentStatus() !== 'success' ? 'failed' : 'success' });
         request.globalAgent = localhost;
     }
 }
@@ -144,6 +154,7 @@ async function runRoundRobin(accounts, localhost) {
                 return 'reuse模式未找到有效的正式快照或last-good快照，已中止且不会开始参与';
             }
             snapshotFilename = reusable.filename;
+            participation.emit('snapshot_reuse', { count: reusable.count, snapshot: snapshotFilename }, { uid: 'global' });
             log.info(
                 '轮转采集',
                 `reuse模式跳过采集，读取${snapshotFilename}中的${reusable.count}条有效候选${reusable.fallback ? '（正式快照无效，已回退last-good）' : ''}`

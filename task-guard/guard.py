@@ -29,6 +29,9 @@ MESSAGES = {
     'PROCESS_EXIT': '任务进程非正常退出', 'PROCESS_LOST': '执行进程异常消失',
     'EXECUTOR_STOPPED': '执行容器已停止', 'OOM_KILLED': '有证据表明进程被内存不足终止',
     'UNCAUGHT_EXCEPTION': '未处理的程序异常', 'START_FAILED': '任务启动失败',
+    'METRICS_SYNC_FAILED': '统计同步连续三次失败',
+    'PARTICIPATION_LOW': '参与量连续零参与或明显下降',
+    'METRICS_INCOMPLETE': '参与量统计记录不完整',
 }
 
 
@@ -153,6 +156,11 @@ def run_task(root, cfg, task, command):
     atomic(state_path, state)
     env = os.environ.copy()
     env.update(TASK_GUARD_RESULT_PATH=str(result_path), TASK_GUARD_RUN_ID=run_id, TASK_GUARD_TASK_KEY=task)
+    if cfg.get('metrics_enabled') and task == 'start':
+        state['metrics_enabled'] = True
+        atomic(state_path, state)
+        env.update(TASK_METRICS_FILE=str(root / 'metrics' / 'journal' / (run_id + '.jsonl')),
+                   TASK_METRICS_SERVER=cfg['server'])
     received = []
     child = None
     def forward(sig, _frame):
@@ -286,7 +294,7 @@ def drain(c, data, now, sender=push):
             p['items'] = [i for i in p['items'] if c.execute(
                 'select 1 from faults where task=? and account=? and stage=? and code=? and active=1',
                 (row['task'], i['account'], i['stage'], i['code'])).fetchone()]
-        if not p['items']:
+        if not p.get('title') and not p['items']:
             c.execute('update outbox set sent=? where id=?', (now, row['id']))
             c.commit()
             continue
@@ -296,8 +304,11 @@ def drain(c, data, now, sender=push):
         details = []
         for i in p['items']:
             label = '全局' if i['account'] == 'global' else '账号' + str(i.get('number') or i['account'])
-            details.append(label + ' / ' + i['stage'] + ' / ' + MESSAGES.get(i['code'], '任务异常'))
+            details.append(label + ' / ' + i['stage'] + ' / ' + MESSAGES.get(i['code'], '任务异常')
+                           + (' / ' + i['summary'] if i.get('summary') else ''))
         body = '\n'.join([stamp, *details, '日志：' + p['log_path'], '运行编号：' + p['run_id']])
+        if p.get('title'):
+            title, body = p['title'], p['body']
         try:
             sent = sender(data, title, body)
         except Exception:
