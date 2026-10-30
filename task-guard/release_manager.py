@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import runpy
 import shlex
 import shutil
 import sqlite3
@@ -229,7 +230,7 @@ def shim(root, filename):
             'current=(root/"current").resolve()\n'
             'directory=current/"tools" if (current/"release.json").is_file() else root/"legacy-tools"\n'
             'sys.path.insert(0,str(directory))\n'
-            'runpy.run_path(str(directory/' + repr(filename) + '),run_name="__main__")\n')
+            'globals().update(runpy.run_path(str(directory/' + repr(filename) + '),run_name=__name__))\n')
 
 def entry_script():
     return '''#!/usr/bin/env python3
@@ -247,7 +248,6 @@ os.execv(sys.executable,[sys.executable,str(current/'tools/release_manager.py'),
 
 def bootstrap(data, root, cfg):
     legacy = root / 'legacy-tools'
-    if (legacy / 'ready').exists(): return
     legacy.mkdir(mode=0o700, exist_ok=True)
     for filename in ['guard.py', 'metrics.py']:
         if not (legacy / filename).exists(): shutil.copy2(root / filename, legacy / filename)
@@ -280,6 +280,13 @@ def deployment_lock(root):
 def current_dir(root):
     p = root / 'current'
     return p.resolve() if p.is_symlink() else None
+
+def restore_entries(backup, data, root):
+    for name in ['guard.py', 'metrics.py', 'release_entry.py']:
+        if (backup / name).exists():
+            atomic(root / name, (backup / name).read_text(), (backup / name).stat().st_mode & 0o777)
+    for name in TASKS.values():
+        atomic(data / 'scripts' / name, (backup / name).read_text(), (backup / name).stat().st_mode & 0o777)
 
 def check(a):
     data, root, cfg = context(a.data)
@@ -314,6 +321,12 @@ def deploy(a):
             os.replace(temp, target)
         hashes = read(root / 'archive-hashes.json') if (root / 'archive-hashes.json').exists() else {}
         hashes[a.release] = a.sha256; atomic(root / 'archive-hashes.json', hashes)
+        manifests = read(root / 'manifest-hashes.json') if (root / 'manifest-hashes.json').exists() else {}
+        predecessor = current_dir(root)
+        if predecessor and (predecessor / 'release.json').exists():
+            prior = verify(predecessor)
+            manifests.setdefault(prior['release_id'], digest(predecessor / 'release.json'))
+        manifests[a.release] = digest(target / 'release.json'); atomic(root / 'manifest-hashes.json', manifests)
         before = configuration(data); initial_progress = progress(data)
         backup = data / 'backup' / ('unified-' + a.release + '-' + str(time.time_ns()))
         backup.mkdir(parents=True, mode=0o700)
@@ -322,6 +335,8 @@ def deploy(a):
                previous=str(previous) if previous else None, config=cfg))
         for filename in ['config.json', 'guard.py', 'metrics.py']:
             shutil.copy2(root / filename, backup / filename)
+        if (root / 'release_entry.py').exists(): shutil.copy2(root / 'release_entry.py', backup / 'release_entry.py')
+        if (root / 'unified-deployment.json').exists(): shutil.copy2(root / 'unified-deployment.json', backup / 'previous-deployment.json')
         for filename in TASKS.values(): shutil.copy2(data / 'scripts' / filename, backup / filename)
         private_config = backup / 'business-config'; private_config.mkdir(mode=0o700)
         for name in ['env.js', 'my_config.js']:
@@ -356,6 +371,9 @@ def deploy(a):
             if 'unified_release' in old: now['unified_release'] = old['unified_release']
             else: now.pop('unified_release', None)
             atomic(root / 'config.json', now)
+            # Restore the predecessor's resolver format as well as its pointer.
+            # Already running processes have loaded their own module bytes.
+            restore_entries(backup, data, root)
             raise
         after_progress = progress(data)
         report = dict(server=cfg['server'], release=a.release, git_commit=read(target / 'release.json')['git_commit'],
@@ -370,13 +388,18 @@ def status(a):
     data, root, cfg = context(a.data); target = current_dir(root)
     if not target or not (target / 'release.json').exists(): raise ValueError('Legacy deployment; no unified release selected')
     m = verify(target, getattr(a, 'release', None))
+    pinned = read(root / 'manifest-hashes.json')
+    if pinned.get(m['release_id']) != digest(target / 'release.json'): raise ValueError('Manifest provenance drift')
+    # A rollback may select a prior resolver format. Validate against the selected
+    # release's already hash-verified definitions, not the caller's tool version.
+    selected = runpy.run_path(str(target / 'tools/release_manager.py'), run_name='_release_shapes')
     for task, filename in TASKS.items():
         text = (data / 'scripts' / filename).read_text()
         expected = '#!/usr/bin/env bash\nbash -c ' + shlex.quote('exec python3 ' + shlex.quote(runtime_path(root, data, cfg) + '/release_entry.py') + ' ' + task) + '\n'
         if text != expected: raise ValueError('Task wrapper drift: ' + task)
     for filename in ['guard.py', 'metrics.py']:
-        if (root / filename).read_text() != shim(root, filename): raise ValueError('Host resolver drift: ' + filename)
-    if (root / 'release_entry.py').read_text() != entry_script(): raise ValueError('Task resolver drift')
+        if (root / filename).read_text() != selected['shim'](root, filename): raise ValueError('Host resolver drift: ' + filename)
+    if (root / 'release_entry.py').read_text() != selected['entry_script'](): raise ValueError('Task resolver drift')
     if cfg.get('unified_release') != m['release_id']: raise ValueError('Configured release mismatch')
     report = dict(server=cfg['server'], release=m['release_id'], git_commit=m['git_commit'],
                   manifest_sha256=digest(target / 'release.json'), actual_files_verified=len(m['files']),
@@ -396,9 +419,12 @@ def rollback(a):
         if (previous / 'release.json').exists(): verify(previous)
         unchanged = configuration(data)
         switch(root, previous)
+        restore_entries(backup, data, root)
         if (previous / 'release.json').exists(): cfg['unified_release'] = read(previous / 'release.json')['release_id']
         else: cfg.pop('unified_release', None)
         atomic(root / 'config.json', cfg)
+        if (backup / 'previous-deployment.json').exists():
+            atomic(root / 'unified-deployment.json', read(backup / 'previous-deployment.json'))
         if configuration(data) != unchanged: raise ValueError('Business configuration changed during rollback')
         print(json.dumps(dict(rolled_back=a.release, active=str(previous), business_progress_restored=False)))
 

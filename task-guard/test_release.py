@@ -118,6 +118,13 @@ class ReleaseTests(unittest.TestCase):
             t.addfile(member, io.BytesIO(b'x'))
         with self.assertRaises(ValueError): r.unpack(archive, self.base / 'out')
 
+    def test_host_resolver_preserves_import_contract(self):
+        code = 'def marker(): return "imported"\nif __name__ == "__main__": raise SystemExit(64)\n'
+        a = self.package('one', code); r.deploy(a)
+        script = 'import sys;sys.path.insert(0,sys.argv[1]);import guard;print(guard.marker())'
+        output = subprocess.check_output([sys.executable, '-c', script, str(self.root)], text=True)
+        self.assertEqual(output.strip(), 'imported')
+
     def test_interrupted_bootstrap_can_resume_without_replacing_legacy(self):
         a = self.package('one')
         original = r.atomic
