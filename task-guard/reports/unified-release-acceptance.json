@@ -1,0 +1,52 @@
+{
+  "release_id": "20261030-unified-v2",
+  "source_git_commit": "85a96e2abf27297da09cdbd1187696cec3917b6f",
+  "archive_sha256": "067e39534a381a7eb5aef2ad89057933d8e497fd71641d5284ad0f564aaaa627",
+  "manifest_sha256": "6197b11081f2d5e604967cdba40cf657b4fc4e1ef90a8e9241f646efb11e5394",
+  "bili_source_baseline": "401698e88abedd1ff16ac0e5833b78369d29c631",
+  "deployment_order": ["wuhan", "singapore", "usa"],
+  "all_servers": {
+    "same_archive": true,
+    "same_manifest": true,
+    "actual_payload_files_verified": 932,
+    "four_task_wrappers_verified": true,
+    "host_resolvers_verified": true,
+    "configuration_unchanged": true,
+    "concurrent_progress_changes": [],
+    "business_jobs_started": false,
+    "business_jobs_stopped": false,
+    "monitor_service_exit_status": 0,
+    "collector_service_exit_status": 0,
+    "statistics_fresh": true
+  },
+  "viewer_hosts": {"usa_warnings": [], "singapore_readable": true},
+  "restricted_statistics_export": {
+    "usa": {"roster_count": 5, "arbitrary_commands": "rejected", "config_read": "rejected", "forwarding": "denied", "pty": "denied"},
+    "singapore": {"roster_count": 5, "arbitrary_commands": "rejected", "config_read": "rejected", "forwarding": "denied", "pty": "denied"}
+  },
+  "build_tests": {
+    "explicit_node_test_programs_passed": 8,
+    "python_tests_passed": 32,
+    "bili_structured_result_tests_passed": 1,
+    "production_credentials_used": false
+  },
+  "additional_acceptance": {
+    "release_fixture_tests_passed_per_host": 10,
+    "all_three_host_python_environments_tested": true,
+    "sourced_shell_completion_and_exit_codes": [2, 143, 137],
+    "old_process_retains_selected_version": true,
+    "new_process_uses_new_version": true,
+    "corrupt_archive_rejected": true,
+    "incompatible_runtime_rejected": true,
+    "concurrent_deployment_rejected": true,
+    "duplicate_deployment_is_idempotent": true,
+    "failed_switch_restores_previous_version": true,
+    "interrupted_bootstrap_can_resume": true,
+    "rollback_preserves_progress_and_new_accounts": true,
+    "source_and_wrapper_drift_detected": true,
+    "host_import_contract_preserved": true
+  },
+  "automatic_deployment_enabled": false,
+  "default_branch_changed": false,
+  "acceptance_note": "The final report commit adds only documentation and an extra fixture test. The deployed payload is pinned to source_git_commit. Real business runs are left to existing schedules."
+}

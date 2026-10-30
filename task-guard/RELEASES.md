@@ -70,6 +70,19 @@ wrapper. It does not trust a saved manifest digest as proof of installed bytes.
 Legitimate account additions do not count as source drift. Current checks of
 business configuration are relative to each deployment, not the first rollout.
 
+The authoritative selected version is `task-guard/current/release.json`, together
+with the independently pinned manifest hash and archive hash. Earlier `release`
+and `lottery_release` configuration fields describe historical one-off deployments
+and are no longer used to launch unified tasks. `unified_release` records the
+selected unified version. The deployed tool is available directly at
+`DATA/task-guard/current/tools/release_manager.py` for status and rollback.
+
+Current accepted release: `20261030-unified-v2`, source commit
+`85a96e2abf27297da09cdbd1187696cec3917b6f`. All three servers use the same archive
+and all 932 payload files pass actual hash verification. See
+`reports/unified-release-acceptance.json` for sanitized results. Later report/test
+commits do not change the pinned production payload.
+
 ## Backup and rollback
 
 Private backups are in `DATA/backup/unified-RELEASE_ID-TIMESTAMP`: previous entry

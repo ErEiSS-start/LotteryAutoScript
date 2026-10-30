@@ -125,6 +125,17 @@ class ReleaseTests(unittest.TestCase):
         output = subprocess.check_output([sys.executable, '-c', script, str(self.root)], text=True)
         self.assertEqual(output.strip(), 'imported')
 
+    def test_sourced_wrappers_keep_shell_completion_and_exit_codes(self):
+        for name, code, expected in [('exit2', 'raise SystemExit(2)', 2),
+                                     ('term', 'import os,signal;os.kill(os.getpid(),signal.SIGTERM)', 143),
+                                     ('kill', 'import os,signal;os.kill(os.getpid(),signal.SIGKILL)', 137)]:
+            a = self.package(name, code + '\n'); r.deploy(a)
+            wrapper = self.data / 'scripts' / r.TASKS['start']
+            command = 'source ' + r.shlex.quote(str(wrapper)) + '; result=$?; echo completed:$result; exit $result'
+            child = subprocess.run(['bash', '-c', command], capture_output=True, text=True, timeout=10)
+            self.assertEqual(child.returncode, expected)
+            self.assertIn('completed:' + str(expected), child.stdout)
+
     def test_interrupted_bootstrap_can_resume_without_replacing_legacy(self):
         a = self.package('one')
         original = r.atomic
