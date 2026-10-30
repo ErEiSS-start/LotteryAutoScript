@@ -14,6 +14,7 @@ class WinnerDeploymentTests(unittest.TestCase):
             (root/'wins').mkdir(parents=True);(root/'wins/config.json').write_text(json.dumps({'hub':True}))
             release=root/'unified-releases/test';(release/'viewer').mkdir(parents=True)
             (release/'viewer/server.js').write_text('fixture')
+            (release/'tools').mkdir();(release/'tools/wins_compat.cjs').write_text('fixture compatibility adapter')
             (root/'current').symlink_to(release,target_is_directory=True)
             backup=base/'backup';backup.mkdir()
             def mapped(value):

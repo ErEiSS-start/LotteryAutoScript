@@ -117,5 +117,23 @@ class WinnerTests(unittest.TestCase):
         self.assertEqual(child.returncode,0,child.stderr)
         self.assertFalse(list(tools.rglob('__pycache__')))
 
+    def test_delivery_receipt_preserves_legacy_reminder_clock(self):
+        row=w.merge(self.c,self.row(),self.now);self.c.commit();w.compatibility_record(self.root,row)
+        w.delivered(self.c,w.notice(row),self.now+1);self.c.commit()
+        self.assertEqual(w.flush_receipts(self.root,self.cfg,self.c,self.now+2),0)
+        legacy=json.loads((self.business/'lottery_info/pending_wins_10001.json').read_text())['records'][0]
+        self.assertEqual(legacy['notifyCount'],1);self.assertEqual(legacy['lastNotifiedAt'],(self.now+1)*1000)
+        w.reply(self.c,dict(accountUid='10001',talkerId='20002',messageSequence='9'),self.now+3,self.root)
+        legacy=json.loads((self.business/'lottery_info/pending_wins_10001.json').read_text())['records'][0]
+        self.assertEqual(legacy['status'],'acknowledged')
+
+    def test_rollback_suspends_pending_and_resume_checks_delivery_slot(self):
+        row=w.merge(self.c,self.row(),self.now);self.c.commit();w.enqueue(self.c,self.root,self.now);w.suspend(self.c)
+        called=[];guard.drain(self.c,self.root.parent,self.now+1,sender=lambda *args:called.append(args) or True)
+        self.assertFalse(called)
+        newer=dict(row,notifyCount=1,lastNotifiedAt=(self.now+2)*1000);w.merge(self.c,newer,self.now+2);self.c.commit()
+        w.resume(self.c,self.now+3)
+        self.assertEqual(self.c.execute("select kind from outbox").fetchone()[0],'wins_cancelled')
+
 
 if __name__=='__main__':unittest.main()

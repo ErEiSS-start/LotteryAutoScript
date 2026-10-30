@@ -46,6 +46,9 @@ notice and retry after 5, 15, then 60 minutes. Clear winners repeat after two ho
 reviews deliver once. Dispatch rechecks the latest lifecycle and generation so
 archive/reply/reclassification cancels obsolete notices. Manual confirmation
 starts a winner generation; manual restore invalidates a cancelled generation.
+Successful delivery receipts are durably queued back to each source and update
+its compatible reminder clock. Offline receipt updates retry without resending
+the prize notification. Reply acknowledgments also update the compatible ledger.
 
 Migration preserves IDs, notification counts and timestamps, acknowledged replies
 and manual dismissal ledgers. It does not mass-resend history. Existing active
@@ -78,7 +81,8 @@ Only public viewer source gets read access, with directory traversal granted to
 the existing viewer group; sensitive state remains root-private.
 
 Remote dedicated SSH keys restrict the source IP, force `wins_agent.py`, deny PTY
-and forwarding, and accept only literal `export` or `action`. Host keys are pinned.
+and forwarding, and accept only literal `export`, `action` or `receipt`. Receipt
+batches accept only validated identities and delivery counters. Host keys are pinned.
 Exports contain normalized winner records and enabled UID rosters, never cookies,
 full API responses or configuration. Agent protocol is version 1. A lost action
 acknowledgment can be retried with the same operation ID without applying twice.
@@ -98,6 +102,20 @@ Rollback restores prior viewer/service entries and release selection, retaining
 winner tables and original events. Compatible dismissal ledgers remain in place;
 old records and account progress are never restored over newer state. Disabled
 winner resolvers reject remote commands when the selected release lacks support.
+Rollback first flushes pending delivery receipts and suspends unsent winner
+notices while keeping them durable. If a source cannot acknowledge receipts,
+rollback refuses before changing the selected version. Reactivation resumes only
+eligible notices whose delivery slot is still current. Other alerts and daily
+notices are untouched.
+
+When returning to a pre-winner release, the updated release controller installs
+one explicitly recorded check-only notification adapter. It filters manually
+archived public notices by account, sender, timestamp, original link and exact
+content; private notices already respect the compatible ledger. Its actual hash
+and wrapper hash are verified and reported as `compatibility` by the updated
+controller, rather than silently modifying an immutable old release. Use the
+updated controller from this source checkout to audit such a rollback. Normal
+winner deployment removes that check-only override. No messages are marked read.
 
 Validation uses synthetic accounts, local test servers, mocked SSH and PushPlus.
 Tests cover the supplied three-prize announcement, paging, corrupt responses,

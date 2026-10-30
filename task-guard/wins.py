@@ -35,6 +35,7 @@ def schema(c):
       create table if not exists winner_sync(server text primary key,at real,error text);
       create table if not exists winner_sources(path text primary key,digest text);
       create table if not exists winner_rosters(server text primary key,payload text);
+      create table if not exists winner_receipts(key text primary key,server text,payload text);
     ''')
 
 def records(c): return [json.loads(row[0]) for row in c.execute('select payload from winner_records')]
@@ -126,13 +127,14 @@ def merge(c, incoming, now):
     put(c, incoming, now)
     return incoming
 
-def reply(c, event, now):
+def reply(c, event, now, root=None):
     for row in records(c):
         if row['accountUid'] != str(event.get('accountUid')) or row.get('source') != 'private' or str(row.get('talkerId')) != str(event.get('talkerId')): continue
         old_seq, new_seq = str(row.get('messageSequence', '')), str(event.get('messageSequence', ''))
         after = int(new_seq) > int(old_seq) if old_seq.isdigit() and new_seq.isdigit() else float(event.get('messageTimestamp', 0)) > float(row.get('messageTimestamp', 0))
         if after:
             row.update(acknowledged=True, status='acknowledged'); put(c, row, now)
+            if root:mirror_state(root,row)
 
 def compatible_write(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -154,6 +156,18 @@ def compatibility_record(root, row):
         copy = dict(row, status='pending' if row['category'] == 'winner' else 'review' if row['category'] == 'review' else 'ignored')
         copy['talkerId'] = copy.get('talkerId') or copy.get('senderUid')
         document['records'].append(copy); compatible_write(p, document)
+
+def mirror_state(root,row):
+    p=root.parent/'scripts/LotteryAutoScript/lottery_info'/('pending_wins_'+row['accountUid']+'.json')
+    if not p.exists():return
+    document=json.loads(p.read_text());changed=False
+    for old in document.get('records',[]):
+        if old.get('id')!=row['id']:continue
+        old['notifyCount']=max(int(old.get('notifyCount',0)),int(row.get('notifyCount',0)))
+        old['lastNotifiedAt']=max(float(old.get('lastNotifiedAt',0)),float(row.get('lastNotifiedAt',0)))
+        if row.get('acknowledged'):old.update(status='acknowledged',acknowledgedAt=time.time()*1000)
+        changed=True
+    if changed:compatible_write(p,document)
 
 def collect(root, cfg, c, now):
     conf = settings(root); owner_map = conf.get('owners', {})
@@ -204,7 +218,7 @@ def collect(root, cfg, c, now):
         n = normalized(row, cfg['server'], owner_map)
         merged = merge(c, n, now)
         compatibility_record(root, merged)
-    for event in replies: reply(c, event, now)
+    for event in replies: reply(c, event, now,root)
     active = [dict(accountUid=row['accountUid'], talkerId=row.get('talkerId')) for row in records(c)
               if row.get('server') == cfg['server'] and row['status'] in ('pending', 'review') and row['source'] == 'private']
     guard.atomic(root / 'wins/active.json', active)
@@ -222,7 +236,7 @@ def notice(row):
         '来源：' + row['source'], '判定：' + row.get('reason', ''),
         '消息时间：' + time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(float(row.get('messageTimestamp', 0)))),
         row.get('content', ''), row.get('link', ''), '管理：https://zj.niichi.me'])
-    return dict(title=title, body=body, items=[], server=row['server'], task='中奖通知', log_path='', run_id='', winner_key=key(row), generation=row.get('generation', 0))
+    return dict(title=title, body=body, items=[], server=row['server'], task='中奖通知', log_path='', run_id='', winner_key=key(row), generation=row.get('generation', 0),notifyCountAtEnqueue=row.get('notifyCount',0))
 
 def enqueue(c, root, now):
     if not settings(root).get('hub'): return
@@ -247,7 +261,7 @@ def before_send(c, payload, now=None):
     row = get(c, payload.get('winner_key', ''))
     active=set()
     for item in c.execute('select payload from winner_rosters'):active.update(json.loads(item[0]))
-    valid=eligible(row) and row['accountUid'] in active and row.get('generation', 0) == payload.get('generation', 0)
+    valid=eligible(row) and row['accountUid'] in active and row.get('generation', 0) == payload.get('generation', 0) and row.get('notifyCount',0)==payload.get('notifyCountAtEnqueue',0)
     if not valid:return False
     sync=c.execute('select at,error from winner_sync where server=?',(row['server'],)).fetchone()
     if not sync or sync[1] or (now if now is not None else time.time())-sync[0]>180:return 'defer'
@@ -259,12 +273,64 @@ def delivered(c, payload, now):
     row['notifyCount'] = int(row.get('notifyCount', 0)) + 1
     row['lastNotifiedAt'] = now * 1000
     put(c, row, now)
+    receipt=dict(accountUid=row['accountUid'],recordId=row.get('originId') or row['id'],notifyCount=row['notifyCount'],
+                 lastNotifiedAt=row['lastNotifiedAt'],generation=row.get('generation',0))
+    c.execute('insert or replace into winner_receipts values(?,?,?)',(key(row),row['server'],json.dumps(receipt)))
+
+def receive_receipts(root,c,request,now):
+    if not isinstance(request,list) or len(request)>50:raise ValueError('Invalid receipt batch')
+    if not c.in_transaction:c.execute('begin immediate')
+    updates=[]
+    for item in request:
+        if not isinstance(item,dict) or set(item)!={'accountUid','recordId','notifyCount','lastNotifiedAt','generation'}:raise ValueError('Invalid receipt fields')
+        uid,identifier=str(item['accountUid']),str(item['recordId'])
+        if not re.fullmatch(r'[1-9]\d*',uid) or not re.fullmatch(r'[a-f0-9]{24}',identifier):raise ValueError('Invalid receipt identity')
+        if not all(isinstance(item[field],(int,float)) and math.isfinite(item[field]) and item[field]>=0 for field in ['notifyCount','lastNotifiedAt','generation']):raise ValueError('Invalid receipt counters')
+        row=get(c,uid+':'+identifier)
+        if not row:raise ValueError('Receipt record unavailable')
+        if item['generation']>=row.get('generation',0):
+            if item['generation']>row.get('generation',0):row['notifyCount']=item['notifyCount']
+            else:row['notifyCount']=max(row.get('notifyCount',0),item['notifyCount'])
+            row['lastNotifiedAt']=max(row.get('lastNotifiedAt',0),item['lastNotifiedAt']);row['generation']=int(item['generation'])
+        updates.append(row)
+    for row in updates:put(c,row,now);mirror_state(root,row)
+    c.commit();return dict(ok=True)
+
+def flush_receipts(root,cfg,c,now,transport=None):
+    transport=transport or ssh
+    pending=c.execute('select * from winner_receipts').fetchall()
+    for server in sorted({row['server'] for row in pending}):
+        peer=next((p for p in settings(root).get('peers',[]) if p['server']==server),None)
+        items=[row for row in pending if row['server']==server]
+        for offset in range(0,len(items),50):
+            batch=items[offset:offset+50];payload=[json.loads(row['payload']) for row in batch]
+            try:
+                if server==cfg['server']:receive_receipts(root,c,payload,now)
+                elif peer:
+                    response=transport(peer,'receipt',payload)
+                    if response.get('ok') is not True:raise ValueError('Receipt not acknowledged')
+                else:raise ValueError('Receipt source unavailable')
+                for row in batch:c.execute('delete from winner_receipts where key=? and payload=?',(row['key'],row['payload']))
+                c.commit()
+            except (ValueError,OSError,subprocess.SubprocessError):c.rollback();break
+    return c.execute('select count(*) from winner_receipts').fetchone()[0]
+
+def suspend(c):
+    c.execute("update outbox set kind='wins_suspended',due=32503680000 where kind='wins' and sent is null");c.commit()
+
+def resume(c,now):
+    for item in c.execute("select id,payload from outbox where kind='wins_suspended' and sent is null").fetchall():
+        payload=json.loads(item['payload']);row=get(c,payload.get('winner_key',''))
+        if eligible(row) and row.get('generation',0)==payload.get('generation',0) and row.get('notifyCount',0)==payload.get('notifyCountAtEnqueue',0):
+            c.execute("update outbox set kind='wins',due=? where id=?",(now,item['id']))
+        else:c.execute("update outbox set kind='wins_cancelled',sent=? where id=?",(now,item['id']))
+    c.commit()
 
 def tick(root, cfg, c, now):
     with (root / 'wins.lock').open('a') as lock:
         try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError: return False
-        schema(c); collect(root, cfg, c, now)
+        schema(c); collect(root, cfg, c, now);resume(c,now)
     # The separate hub unit performs network synchronization; supervision never waits on SSH.
     if settings(root).get('hub'): enqueue(c, root, now)
     return True
@@ -358,7 +424,8 @@ def apply_action(root, cfg, c, request, now):
         response = ssh(peer, 'action', source_request)
         if response.get('ok') is not True: raise ValueError('Remote action not committed')
         if not c.in_transaction:c.execute('begin immediate')
-        row = merge(c, normalized(response['record'], row['server'], settings(root).get('owners', {})), now)
+        remote=dict(response['record'],originId=response['record']['id'])
+        row = merge(c, normalized(remote, row['server'], settings(root).get('owners', {})), now)
     else:
         if not c.in_transaction:c.execute('begin immediate')
         row=get(c,uid+':'+identifier)
@@ -419,23 +486,27 @@ def serve(root):
         server.serve_forever()
 
 def main():
-    p = argparse.ArgumentParser(); p.add_argument('mode', choices=['agent', 'gateway', 'hub', 'collect','serve'])
+    p = argparse.ArgumentParser(); p.add_argument('mode', choices=['agent', 'gateway', 'hub', 'collect','serve','flush'])
     p.add_argument('--root', required=True); a = p.parse_args(); root = Path(a.root)
     cfg = guard.read(root / 'config.json'); now = time.time()
     (root / 'wins').mkdir(mode=0o700, exist_ok=True)
     if a.mode=='serve':serve(root);return
     with (root / 'wins.lock').open('a') as lock:
         c = guard.open_store(root); schema(c)
+        if a.mode=='flush':
+            if flush_receipts(root,cfg,c,now):raise ValueError('Delivery receipts are not synchronized')
+            c.close();return
         if a.mode in ('hub', 'collect'):
             fcntl.flock(lock, fcntl.LOCK_EX)
             collect(root, cfg, c, now); fcntl.flock(lock, fcntl.LOCK_UN)
-            if a.mode == 'hub': sync(root, cfg, c, now); enqueue(c, root, now)
+            if a.mode == 'hub': sync(root, cfg, c, now);flush_receipts(root,cfg,c,now);resume(c,now);enqueue(c, root, now)
             c.close(); return
         if a.mode == 'agent':
             command = os.environ.get('SSH_ORIGINAL_COMMAND', '')
-            if command not in ('export', 'action'): raise ValueError('Only fixed winner commands are supported')
+            if command not in ('export', 'action','receipt'): raise ValueError('Only fixed winner commands are supported')
             if command == 'export': output = export(root, cfg, c, now)
-            else: output = action(root, cfg, c, json.loads(sys.stdin.read(16385)), now)
+            elif command=='action': output = action(root, cfg, c, json.loads(sys.stdin.read(16385)), now)
+            else:output=receive_receipts(root,c,json.loads(sys.stdin.read(16385)),now)
         else:
             request = json.loads(sys.stdin.read(16385))
             if request.get('method') == 'list': output = snapshot(root, cfg, c, request, now)

@@ -25,8 +25,8 @@ TESTS = ['task-guard/test_lottery.cjs', 'task-guard/test_metrics.cjs',
          'test/alert_reading_regression.test.js', 'test/article.test.js',
          'test/check_notification.test.js', 'test/pending_win_store.test.js',
          'test/env_merge.test.js', 'test/shared_state_permission.test.js']
-TESTS += ['test/winner_v4.test.js', 'integrations/winner-viewer/test/server.test.js']
-TOOLS = ['release_manager.py', 'guard.py', 'metrics.py', 'wins.py', 'wins_deploy.py']
+TESTS += ['test/winner_v4.test.js', 'integrations/winner-viewer/test/server.test.js','integrations/winner-viewer/test/gateway.test.js']
+TOOLS = ['release_manager.py', 'guard.py', 'metrics.py', 'wins.py', 'wins_deploy.py','wins_compat.cjs']
 
 def digest(p):
     h = hashlib.sha256()
@@ -381,6 +381,7 @@ def deploy(a):
             switch(root, target)
             # Config remains outside the bundle. Change only release metadata.
             cfg.update(unified_release=a.release)
+            cfg.pop('wins_rollback_compat',None)
             if read(target / 'release.json').get('features', {}).get('wins'):
                 cfg.update(wins_enabled=True)
                 cfg.setdefault('wins_installed_at', time.time())
@@ -426,19 +427,40 @@ def status(a):
     for task, filename in TASKS.items():
         text = (data / 'scripts' / filename).read_text()
         expected = '#!/usr/bin/env bash\nbash -c ' + shlex.quote('exec python3 ' + shlex.quote(runtime_path(root, data, cfg) + '/release_entry.py') + ' ' + task) + '\n'
-        if text != expected: raise ValueError('Task wrapper drift: ' + task)
+        compat=cfg.get('wins_rollback_compat')
+        if task=='check' and compat:
+            patch=root/'wins/compat_notify.cjs'
+            if digest(patch)!=compat['sha256'] or digest(data/'scripts'/filename)!=compat['wrapper_sha256']:raise ValueError('Winner archive compatibility drift')
+        elif text != expected: raise ValueError('Task wrapper drift: ' + task)
     for filename in ['guard.py', 'metrics.py']:
         if (root / filename).read_text() != selected['shim'](root, filename): raise ValueError('Host resolver drift: ' + filename)
     if (root / 'release_entry.py').read_text() != selected['entry_script'](): raise ValueError('Task resolver drift')
     if cfg.get('unified_release') != m['release_id']: raise ValueError('Configured release mismatch')
     report = dict(server=cfg['server'], release=m['release_id'], git_commit=m['git_commit'],
                   manifest_sha256=digest(target / 'release.json'), actual_files_verified=len(m['files']),
-                  health=health(data, root, cfg), passed=True)
+                  health=health(data, root, cfg), compatibility=cfg.get('wins_rollback_compat'),passed=True)
     print(json.dumps(report, ensure_ascii=False))
+
+@contextlib.contextmanager
+def winner_rollback_window(root,release):
+    active=current_dir(root)
+    if not active or not (active/'release.json').exists() or read(active/'release.json')['release_id']!=release:raise ValueError('Named release is not active')
+    if not (active/'tools/wins.py').exists():yield;return
+    with (root/'watch.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        hub=read(root/'wins/config.json').get('hub',False)
+        try:
+            if hub:run(['systemctl','stop','qinglong-wins-hub.timer','qinglong-wins-hub.service'])
+            run(['python3',active/'tools/wins.py','flush','--root',root])
+            with sqlite3.connect(root/'monitor.sqlite') as c:
+                c.execute("update outbox set kind='wins_suspended',due=32503680000 where kind='wins' and sent is null")
+            yield
+        finally:
+            if hub and current_dir(root)==active:run(['systemctl','enable','--now','qinglong-wins-hub.timer'])
 
 def rollback(a):
     data, root, cfg = context(a.data)
-    with deployment_lock(root):
+    with deployment_lock(root),winner_rollback_window(root,a.release):
         report = read(root / 'unified-deployment.json')
         if report['release'] != a.release: raise ValueError('Rollback must name the currently deployed release')
         active = current_dir(root)
@@ -457,6 +479,14 @@ def rollback(a):
         for field in ['wins_enabled','wins_installed_at']:
             if field in before['config']:cfg[field]=before['config'][field]
             else:cfg.pop(field,None)
+        if (active/'tools/wins_compat.cjs').exists() and not (previous/'tools/wins.py').exists():
+            patch=root/'wins/compat_notify.cjs'
+            atomic(patch,(active/'tools/wins_compat.cjs').read_text(),0o644)
+            rroot=runtime_path(root,data,cfg)
+            code='export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require='+rroot+'/wins/compat_notify.cjs"; exec python3 '+shlex.quote(rroot+'/release_entry.py')+' check'
+            wrapper=data/'scripts'/TASKS['check']
+            atomic(wrapper,'#!/usr/bin/env bash\nbash -c '+shlex.quote(code)+'\n',0o755)
+            cfg['wins_rollback_compat']=dict(sha256=digest(patch),wrapper_sha256=digest(wrapper),source_release=report['release'])
         atomic(root / 'config.json', cfg)
         if (backup / 'previous-deployment.json').exists():
             atomic(root / 'unified-deployment.json', read(backup / 'previous-deployment.json'))

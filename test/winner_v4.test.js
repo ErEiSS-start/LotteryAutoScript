@@ -14,6 +14,14 @@ assert.strictEqual(category('恭喜中奖，请扫码领取红包'),'winner');
 assert.strictEqual(category('恭喜您中奖，请联系@客服领取奖品'),'winner');
 assert.strictEqual(classify({...current,content:'恭喜@我的账号 获得手机',mentions:[{mid:'99999',nickname:'我的账号'}]}).category,'ignored');
 assert.strictEqual(classify({...current,source:'at',content:'恭喜中奖'}).category,'review');
+const {filterPublic}=require('../task-guard/wins_compat.cjs');
+const timestamp=100;
+const archivedRecord={id:'a'.repeat(24),accountUid:'10001',senderUid:'20002',messageTimestamp:timestamp,content:'恭喜中奖',link:'https://www.bilibili.com/opus/123'};
+const announcement='## [at]检测结果\n\n发生时间: '+new Date(timestamp*1000).toLocaleString()+'\n\n发信人: 活动方（UID 20002）\n\n原内容:\n恭喜中奖\n\n[直达链接](https://www.bilibili.com/opus/123)\n\n';
+const archived=new Set(['10001:'+archivedRecord.id]);
+assert.strictEqual(filterPublic(announcement,[archivedRecord],archived,'10001'),'');
+assert.strictEqual(filterPublic(announcement.replace('UID 20002','UID 30003'),[archivedRecord],archived,'10001').includes('恭喜中奖'),true);
+assert.strictEqual(filterPublic(announcement,[archivedRecord],archived,'10002'),announcement);
 (async()=>{
   let calls=0;
   const paged=await bili.getWinnerPrivateMessages('20002',2,{requestFn:async ({query})=>{

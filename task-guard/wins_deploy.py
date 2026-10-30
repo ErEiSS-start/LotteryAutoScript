@@ -41,6 +41,9 @@ def main():
             if previous.get(str(path)): shutil.copy2(backup/str(index),path)
             elif path.exists(): path.unlink()
         run(['systemctl','daemon-reload'])
+        if previous.get(str(gateway)):
+            run(['systemctl','enable','--now',gateway.name]);run(['systemctl','restart',gateway.name])
+        if previous.get(str(timer)):run(['systemctl','enable','--now',timer.name])
         if entry.parent.exists(): run(['systemctl','restart','qinglong-log-viewer.service'])
         return
     if not (root/'wins/config.json').is_file(): raise ValueError('Private winner configuration must be prepared before release')
@@ -58,6 +61,7 @@ def main():
     ledger_backup=backup/'ledgers';ledger_backup.mkdir(mode=0o700)
     for source in originals:shutil.copy2(source,ledger_backup/source.name)
     for name,mode in [('wins_agent.py','agent'),('wins_web.py','serve'),('wins_hub.py','hub')]:atomic(root/name,resolver(mode))
+    atomic(root/'wins/compat_notify.cjs',((root/'current').resolve()/'tools/wins_compat.cjs').read_text())
     # Seed existing normalized records without dispatching notifications or calling platform APIs.
     run([sys.executable,(root/'current').resolve()/'tools/wins.py','collect','--root',root])
     try:viewer=pwd.getpwnam('qinglong-log-viewer')
@@ -93,6 +97,7 @@ def main():
     if settings.get('hub'):run(['systemctl','enable','--now',timer.name])
     if viewer:run(['systemctl','restart','qinglong-log-viewer.service'])
     managed=[root/name for name in ['wins_agent.py','wins_web.py','wins_hub.py']]
+    managed.append(root/'wins/compat_notify.cjs')
     managed += [p for p in [override,gateway,unit,timer,entry] if p.exists()]
     atomic(runtime_hashes,json.dumps({str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in managed},indent=2),0o600)
 

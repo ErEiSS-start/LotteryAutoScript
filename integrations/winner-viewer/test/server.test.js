@@ -64,13 +64,13 @@ function winAction(baseUrl, action, body, actionHeader = true) {
         cacheFile: path.join(lotteryRoot, 'web_state', 'test-profile-cache.json'),
         fetchName: async uid => {
             profileRequests += 1;
-            return uid === '1090063081' ? '_AQWQA_' : '哔哩哔哩智能机';
+            return uid === '90001' ? '示例账号甲' : '示例活动方';
         },
     });
-    let resolvedProfiles = await profileResolver.resolveMany(['1090063081', '12076317']);
-    assert.strictEqual(resolvedProfiles['1090063081'], '_AQWQA_');
+    let resolvedProfiles = await profileResolver.resolveMany(['90001', '90002']);
+    assert.strictEqual(resolvedProfiles['90001'], '示例账号甲');
     assert.strictEqual(profileRequests, 2);
-    resolvedProfiles = await profileResolver.resolveMany(['1090063081', '12076317']);
+    resolvedProfiles = await profileResolver.resolveMany(['90001', '90002']);
     assert.strictEqual(profileRequests, 2, '昵称应从长期缓存读取，不应重复访问公开接口');
     let releaseSlowProfile;
     const slowProfileResolver = createProfileResolver({
@@ -96,29 +96,29 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     assert.strictEqual(boundedRequests, 8, '每轮后台昵称刷新最多请求8个UID');
     const winRecord = {
         id: '0123456789abcdef01234567',
-        accountUid: '1090063081',
+        accountUid: '90001',
         accountNumber: 1,
-        talkerId: '12076317',
-        senderUid: '12076317',
+        talkerId: '90002',
+        senderUid: '90002',
         messageSequence: '9001',
         messageTimestamp: 1722470400,
         content: '【有奖调研】请填写问卷，后续发放奖品。完整私信正文。',
-        link: 'https://message.bilibili.com/#/whisper/mid12076317',
+        link: 'https://message.bilibili.com/#/whisper/mid90002',
         status: 'pending',
         detectedAt: 1785540000000,
         lastNotifiedAt: 1785541800000,
         notifyCount: 5,
     };
-    fs.writeFileSync(path.join(lotteryInfo, 'pending_wins_1090063081.json'), JSON.stringify({
+    fs.writeFileSync(path.join(lotteryInfo, 'pending_wins_90001.json'), JSON.stringify({
         version: 1,
-        accountUid: '1090063081',
+        accountUid: '90001',
         accountNumber: 1,
         records: [winRecord],
     }));
     fs.writeFileSync(accountRegistryFile, JSON.stringify({
         version: 1,
         updatedAt: Date.now(),
-        accounts: [{ uid: '1090063081', number: 1 }],
+        accounts: [{ uid: '90001', number: 1 }],
     }));
     fs.writeFileSync(path.join(lotteryInfo, 'pending_wins_20002.json'), JSON.stringify({
         version: 1,
@@ -296,8 +296,8 @@ function winAction(baseUrl, action, body, actionHeader = true) {
     assert.deepStrictEqual(payload.warnings, []);
     assert.strictEqual(payload.records.some(record => record.accountUid === '20002'), false, '不得显示非本机帐号记录');
     assert.strictEqual(payload.records[0].content, winRecord.content, '登录后应返回完整私信正文');
-    assert.strictEqual(payload.records[0].accountName, '_AQWQA_');
-    assert.strictEqual(payload.records[0].senderName, '哔哩哔哩智能机');
+    assert.strictEqual(payload.records[0].accountName, '示例账号甲');
+    assert.strictEqual(payload.records[0].senderName, '示例活动方');
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(winStateFile, 'utf8')).records, [], '应清理失去对应中奖记录的账本条目');
 
