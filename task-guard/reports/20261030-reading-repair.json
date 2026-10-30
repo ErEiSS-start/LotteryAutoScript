@@ -1,0 +1,31 @@
+{
+  "release": "20261030-reading-fix-v1",
+  "deployment_order": ["wuhan", "singapore", "usa"],
+  "source_digest": "c622421d6546cd19470f486097b5bfee7f10111a272ce99e32d567b3b80c3a8a",
+  "all_servers": {
+    "deployment_verification_passed": true,
+    "business_files_changed": [],
+    "business_tasks_started_by_deployment": false,
+    "account_configuration_unchanged": true,
+    "cron_configuration_unchanged": true,
+    "failure_monitor_active": true,
+    "metrics_collector_active": true,
+    "statistics_journal_integrity": true,
+    "offline_node_reading_regression_passed": true,
+    "existing_article_and_notification_tests_passed": true
+  },
+  "python_unit_tests": {"passed": 23},
+  "read_only_validation": {
+    "affected_articles": 5,
+    "valid_article_bodies": 5,
+    "followed_session_pages_to_end": 8,
+    "unfollowed_session_pages_to_end": 24,
+    "deployed_node_adapter_followed": {"complete": true, "reason": "covered", "covered": 125, "expected": 120, "pages": 5},
+    "deployed_node_adapter_unfollowed": {"complete": true, "reason": "covered", "covered": 143, "expected": 131, "pages": 11},
+    "private_message_bodies_read": false,
+    "messages_marked_read": false,
+    "business_interactions_performed": false
+  },
+  "recovery_policy": "Only a subsequent normally scheduled successful business run can resolve an existing incident.",
+  "rollback_document": "task-guard/READING-REPAIR.md"
+}

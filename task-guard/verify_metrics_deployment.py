@@ -32,7 +32,9 @@ with sqlite3.connect('file:'+str(root/'metrics/local.sqlite')+'?mode=ro',uri=Tru
     bad=c.execute("select value from meta where key='bad_journals'").fetchone()
     checks['journal_integrity']=not (bad and json.loads(bad[0]))
 source=json.loads((root/'metrics-source-hashes.json').read_text())
-checks['release_has_metrics_entry']='20261030-metrics-v1/lottery/main.js' in (data/'scripts/LotteryAutoScript_start.sh').read_text()
+runtime='/ql/data' if cfg.get('container') else str(data)
+entry=cfg.get('lottery_release',runtime+'/task-guard/releases/20261030-metrics-v1/lottery')+'/main.js'
+checks['release_has_metrics_entry']=entry in (data/'scripts/LotteryAutoScript_start.sh').read_text()
 report=dict(server=cfg['server'],checks=checks,
             source_digest=hashlib.sha256(json.dumps(source,sort_keys=True).encode()).hexdigest(),
             passed=all(checks.values()))

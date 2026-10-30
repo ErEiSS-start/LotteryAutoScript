@@ -23,9 +23,10 @@ cfg.pop('metrics_peers',None)
 tmp=root/'config.json.rollback'
 tmp.write_text(json.dumps(cfg,ensure_ascii=False,indent=2))
 os.replace(tmp,root/'config.json')
-tmp=data/'scripts/LotteryAutoScript_start.sh.rollback'
-shutil.copy2(backup/'LotteryAutoScript_start.sh',tmp)
-os.replace(tmp,data/'scripts/LotteryAutoScript_start.sh')
+if not cfg.get('lottery_release'):
+    tmp=data/'scripts/LotteryAutoScript_start.sh.rollback'
+    shutil.copy2(backup/'LotteryAutoScript_start.sh',tmp)
+    os.replace(tmp,data/'scripts/LotteryAutoScript_start.sh')
 for peer in peers:
     for field in ['key','known_hosts']:
         if peer.get(field):
