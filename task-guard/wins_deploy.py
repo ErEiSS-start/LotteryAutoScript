@@ -14,7 +14,7 @@ def atomic(path, content, mode=0o644):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp=path.with_name(path.name+'.wins-new');temp.write_text(content);temp.chmod(mode);os.replace(temp,path)
 
-def run(args): subprocess.run(args,check=True,capture_output=True,text=True,timeout=45)
+def run(args): subprocess.run(args,check=True,capture_output=True,text=True,timeout=45,env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1'))
 
 def resolver(mode):
     return ('#!/usr/bin/env python3\nimport sys,runpy\nfrom pathlib import Path\nsys.dont_write_bytecode=True\n'

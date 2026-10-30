@@ -395,8 +395,9 @@ def deploy(a):
             else:
                 legacy = root / 'legacy-tools'; switch(root, legacy)
             old = read(backup / 'config.json'); now = read(root / 'config.json')
-            if 'unified_release' in old: now['unified_release'] = old['unified_release']
-            else: now.pop('unified_release', None)
+            for field in ['unified_release','wins_enabled','wins_installed_at']:
+                if field in old:now[field]=old[field]
+                else:now.pop(field,None)
             atomic(root / 'config.json', now)
             # Restore the predecessor's resolver format as well as its pointer.
             # Already running processes have loaded their own module bytes.
@@ -453,6 +454,9 @@ def rollback(a):
             run(['python3', active / 'tools/wins_deploy.py', 'restore', '--data', data, '--backup', backup])
         if (previous / 'release.json').exists(): cfg['unified_release'] = read(previous / 'release.json')['release_id']
         else: cfg.pop('unified_release', None)
+        for field in ['wins_enabled','wins_installed_at']:
+            if field in before['config']:cfg[field]=before['config'][field]
+            else:cfg.pop(field,None)
         atomic(root / 'config.json', cfg)
         if (backup / 'previous-deployment.json').exists():
             atomic(root / 'unified-deployment.json', read(backup / 'previous-deployment.json'))

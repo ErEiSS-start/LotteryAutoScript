@@ -301,6 +301,9 @@ def drain(c, data, now, sender=push):
             if not eligibility:
                 c.execute('update outbox set sent=?,kind=? where id=?', (now, 'wins_cancelled', row['id']))
                 c.commit(); continue
+            p=wins.notice(wins.get(c,p['winner_key']))
+            c.execute('update outbox set payload=? where id=?',(json.dumps(p,ensure_ascii=False),row['id']))
+            c.commit()
         # Do not send a delayed failure after it has already disappeared.
         if row['kind'] == 'failure':
             p['items'] = [i for i in p['items'] if c.execute(

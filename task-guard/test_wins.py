@@ -2,6 +2,8 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -98,6 +100,22 @@ class WinnerTests(unittest.TestCase):
         for uid in ['../config','1; id','']:
             with self.assertRaises(ValueError): w.action(self.root,self.cfg,self.c,dict(action='dismiss',accountUid=uid,recordId='a'*24,operationId='operation-000000000'),self.now)
         with self.assertRaises(ValueError):w.action(self.root,self.cfg,self.c,dict(self.request('dismiss'),path='/etc/passwd'),self.now)
+
+    def test_same_platform_message_keeps_identity_when_body_changes(self):
+        original=w.merge(self.c,self.row(),self.now)
+        edited=self.row(identifier='b'*24);edited['content']='恭喜您中奖，请通过新的链接填写地址'
+        merged=w.merge(self.c,edited,self.now+1)
+        self.assertEqual(merged['id'],original['id']);self.assertEqual(len(w.records(self.c)),1)
+        self.assertEqual(merged['content'],edited['content'])
+
+    def test_direct_collector_does_not_write_release_bytecode(self):
+        tools=self.root/'current/tools';tools.mkdir()
+        source=Path(__file__).resolve().parent
+        for name in ['wins.py','guard.py']:shutil.copy2(source/name,tools/name)
+        environment=dict(os.environ);environment.pop('PYTHONDONTWRITEBYTECODE',None)
+        child=subprocess.run([sys.executable,str(tools/'wins.py'),'collect','--root',str(self.root)],env=environment,capture_output=True,text=True,timeout=15)
+        self.assertEqual(child.returncode,0,child.stderr)
+        self.assertFalse(list(tools.rglob('__pycache__')))
 
 
 if __name__=='__main__':unittest.main()

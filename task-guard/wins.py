@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 import uuid
+sys.dont_write_bytecode = True
 import guard
 
 LIMIT = 8 * 1024 * 1024
@@ -66,7 +67,7 @@ def normalized(row, server, owner_map):
     fields = ['accountNumber', 'accountName', 'talkerId', 'senderUid', 'senderName', 'sourceMessageId',
               'messageSequence', 'messageTimestamp', 'content', 'link', 'mentions', 'category', 'reason', 'ruleVersion',
               'notifyCount', 'lastNotifiedAt', 'detectedAt', 'status', 'manual', 'dismissed', 'acknowledged',
-              'generation', 'operationAt', 'operationId', 'sources']
+              'generation', 'operationAt', 'operationId', 'sources','originId']
     result = {k: row[k] for k in fields if k in row}
     result.update(id=identifier, accountUid=uid, source=source, server=server,
                   owner=owner.get('owner', '归属未设置'), accountName=row.get('accountName') or owner.get('name', ''))
@@ -90,6 +91,14 @@ def status_of(row):
 
 def merge(c, incoming, now):
     existing = get(c, key(incoming))
+    if not existing:
+        for candidate in records(c):
+            if candidate['accountUid']!=incoming['accountUid'] or candidate['source']!=incoming['source']:continue
+            if incoming['source']=='private':
+                same=(str(candidate.get('talkerId'))==str(incoming.get('talkerId')) and bool(incoming.get('messageSequence')) and str(candidate.get('messageSequence'))==str(incoming['messageSequence']))
+            else:
+                same=bool(incoming.get('sourceMessageId')) and str(candidate.get('sourceMessageId'))==str(incoming['sourceMessageId'])
+            if same:existing=candidate;incoming['id']=candidate['id'];break
     # Cross-source merge requires the same account, sender, activity and exact
     # normalized content. Merely sharing a prize or activity never merges records.
     activity = re.search(r'(?:opus/|t\.bilibili\.com/)(\d+)', incoming.get('link', ''))
@@ -274,7 +283,7 @@ def export(root, cfg, c, now):
     local = set(roster(root))
     state=c.execute('select at,error from winner_sync where server=?',(cfg['server'],)).fetchone()
     return dict(version=1, server=cfg['server'], at=state[0] if state else 0, complete=bool(state and not state[1]), roster=sorted(local),
-                records=[row for row in records(c) if row['server'] == cfg['server'] and row['accountUid'] in local])
+                records=[dict(row,originId=row['id']) for row in records(c) if row['server'] == cfg['server'] and row['accountUid'] in local])
 
 def sync(root, cfg, c, now, transport=ssh):
     for peer in settings(root).get('peers', []):
@@ -345,7 +354,8 @@ def apply_action(root, cfg, c, request, now):
         if not peer: raise ValueError('Record source unavailable')
         state = c.execute('select at,error from winner_sync where server=?', (row['server'],)).fetchone()
         if not state or state[1] or now - state[0] > 180: raise ValueError('Record source is offline')
-        response = ssh(peer, 'action', request)
+        source_request=dict(request,recordId=row.get('originId') or row['id'])
+        response = ssh(peer, 'action', source_request)
         if response.get('ok') is not True: raise ValueError('Remote action not committed')
         if not c.in_transaction:c.execute('begin immediate')
         row = merge(c, normalized(response['record'], row['server'], settings(root).get('owners', {})), now)
