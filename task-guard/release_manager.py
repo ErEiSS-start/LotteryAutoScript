@@ -44,7 +44,7 @@ def atomic(p, value, mode=0o600):
 
 def run(args, **kwargs):
     r = subprocess.run([str(x) for x in args], capture_output=True, text=True, **kwargs)
-    if r.returncode: raise RuntimeError('Command failed: ' + ' '.join(map(str, args[:3])) + '\n' + r.stderr[-1800:])
+    if r.returncode: raise RuntimeError('Command failed: ' + ' '.join(map(str, args[:3])) + '\n' + (r.stderr + r.stdout)[-2400:])
     return r.stdout
 
 def valid_id(value):
@@ -128,6 +128,7 @@ def build(a):
         run(['git', 'apply', '--check', str(patch)], cwd=bili)
         run(['git', 'apply', str(patch)], cwd=bili)
         env.update(DOTNET_CLI_TELEMETRY_OPTOUT='1', DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1',
+                   HUSKY='0',  # Source archives have no Git hooks to install.
                    DOTNET_ROOT=str(Path(a.dotnet).resolve().parent),
                    PATH=str(Path(a.dotnet).resolve().parent) + os.pathsep + env.get('PATH', ''))
         test_project = 'test/Ray.BiliBiliTool.DomainService.UnitTests'
