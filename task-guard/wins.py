@@ -230,8 +230,9 @@ def eligible(row): return row and row['status'] in ('pending', 'review') and row
 
 def notice(row):
     label = '明确中奖待处理' if row['category'] == 'winner' else '疑似中奖待确认'
-    title = '[' + row['server'] + '] ' + row.get('owner', '归属未设置') + ' / ' + (row.get('accountName') or row['accountUid']) + ' / ' + label
-    body = '\n\n'.join(['归属：' + row.get('owner', '归属未设置'),
+    category = '明确中奖' if row['category'] == 'winner' else '疑似中奖'
+    title = '【' + category + '】' + row.get('owner', '归属未设置') + ' / ' + (row.get('accountName') or row['accountUid']) + ' [' + row['server'] + ']'
+    body = '\n\n'.join(['分类：' + label, '归属：' + row.get('owner', '归属未设置'),
         '账号：%s（UID %s）' % (row.get('accountName') or '昵称暂未获取', row['accountUid']),
         '来源：' + row['source'], '判定：' + row.get('reason', ''),
         '消息时间：' + time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(float(row.get('messageTimestamp', 0)))),
