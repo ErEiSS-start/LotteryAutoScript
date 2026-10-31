@@ -242,6 +242,40 @@ class MetricsTests(unittest.TestCase):
             self.assertEqual(monitor.execute("select count(*) from outbox where kind='notice'").fetchone()[0],1)
             self.assertEqual(monitor.execute("select count(*) from outbox where task='metrics_sync' and kind='recovery'").fetchone()[0],1)
 
+    def test_report_new_account_does_not_inherit_completed_run_or_zero(self):
+        lo,_=self.setup_day()
+        self.event('roster',dict(accounts=[dict(uid='11',number=1),dict(uid='12',number=2)]),at=lo+500)
+        report=m.summarize(self.c,self.cfg,'2026-10-19',self.now)
+        text=m.render(report,{'12':{'name':'Fixture New','owner':'Friend'}})
+        section=text.split('2号 Fixture New（Friend）｜',1)[1].split('━━',1)[0]
+        self.assertIn('待首轮参与',section)
+        self.assertNotIn('已完成',section)
+        self.assertIn('参与数据：—（未观测，不填零）',section)
+        self.assertFalse(report['accounts']['12']['eligible'])
+
+    def test_report_uncovered_server_is_unknown_and_fault_is_grouped(self):
+        lo,_=self.setup_day()
+        self.event('roster',dict(accounts=[dict(uid='22',number=2)]),server='U',at=lo-100)
+        self.event('run',dict(started_at=lo+1,finished_at=lo+200,status='failed',complete=True,
+                              issues=['DISCOVERY_INCOMPLETE'],accounts=[]),at=lo+202)
+        report=m.summarize(self.c,self.cfg,'2026-10-19',self.now)
+        text=m.render(report)
+        section=text.split('━━ U · 统计未覆盖 ━━',1)[1]
+        self.assertIn('参与数据：—（未观测，不填零）',section)
+        self.assertNotIn('成功 0',section)
+        self.assertIn('非完整全天总量',text)
+        self.assertEqual(text.count('共同原因：采集未生成完整有效快照'),1)
+        self.assertIn('成功 1 / 候选 2',text)
+
+    def test_report_empty_participation_and_cross_day_span_are_observed(self):
+        lo,hi=self.setup_day(success=False)
+        self.c.execute("delete from events where type='account_begin'")
+        self.event('account_begin',dict(span='cross',phase='participation'),'11',at=lo-10)
+        self.event('account_end',dict(span='cross',phase='participation',status='success'),'11',at=lo+5)
+        report=m.summarize(self.c,self.cfg,'2026-10-19',self.now)
+        self.assertTrue(report['servers']['W']['accounts'][0]['participation_seen'])
+        self.assertIn('成功 0 / 候选 2',m.render(report))
+
     def test_snapshot_shared_queue_all_skipped_and_assignment_change(self):
         lo,_=self.setup_day(success=False)
         self.event('disposition',dict(dyid='1',outcome='skipped',remaining=1),'11',at=lo+50)

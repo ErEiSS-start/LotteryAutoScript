@@ -393,6 +393,8 @@ def summarize(c, cfg, day, now, cached_events=None):
             server_rows[s]['reused_count'] += data['count']
         if not row:
             continue
+        if e['type'] == 'account_begin' and data.get('phase') == 'participation':
+            row['participation_seen'] = True
         if e['type'] == 'candidates':
             row['candidates'].update(map(str, data['ids']))
         elif e['type'] == 'interaction' and data.get('success') is True:
@@ -406,7 +408,7 @@ def summarize(c, cfg, day, now, cached_events=None):
         if start >= hi or end <= lo:
             continue
         server_rows[s]['seconds'] += max(0, min(end, hi) - max(start, lo))
-        server_rows[s]['runs'].append(dict(run_id=run_id, status=data['status'], issues=data.get('issues', [])))
+        server_rows[s]['runs'].append(dict(run_id=run_id, started_at=start, status=data['status'], issues=data.get('issues', [])))
         for (server, uid), row in account_rows.items():
             if server == s:
                 if start >= row.get('run_started_at', 0):
@@ -433,6 +435,7 @@ def summarize(c, cfg, day, now, cached_events=None):
             row['complete'] = False
         if begin['data'].get('phase') == 'participation':
             row['has_run'] = True
+            row['participation_seen'] = True
     combined = {}
     for (server, uid), row in account_rows.items():
         row['server'] = server
@@ -504,30 +507,82 @@ def evaluate(c, day, report):
     return issues, outcomes
 
 
-def render(report):
-    lines = [report['day'] + ' 参与量日报（纽约时间）']
+def report_duration(seconds):
+    seconds = int(max(0, seconds))
+    hours, minutes = seconds // 3600, seconds % 3600 // 60
+    return ('%d小时%d分' % (hours, minutes)) if hours else ('%d分%d秒' % (minutes, seconds % 60))
+
+
+def report_server_state(values):
+    if values['missing']: return '数据缺失'
+    if not values['runs']: return '统计未覆盖'
+    latest = max(values['runs'], key=lambda run: run.get('started_at', 0))
+    if latest['status'] == 'running': return '仍在运行'
+    if latest['status'] == 'cancelled': return '手动取消'
+    if 'DISCOVERY_INCOMPLETE' in latest.get('issues', []): return '采集失败'
+    if latest['status'] == 'failed': return '任务失败'
+    if latest['status'] == 'partial': return '部分失败'
+    return '已完成'
+
+
+def render(report, identities=None):
+    identities = identities or {}
     total = len({(uid, dyid) for uid, a in report['accounts'].items() for dyid in a['success']})
-    lines.append('三台合计已确认成功：%d（账号＋动态去重）' % total)
+    states = {s: report_server_state(v) for s, v in report['servers'].items()}
+    incomplete = any(not a['complete'] for a in report['accounts'].values()) or any(s != '已完成' for s in states.values())
+    lines = [report['day'] + ' 抽奖参与日报', '统计范围：纽约时间 00:00—24:00', '',
+             '已确认参与：%d 次%s' % (total, '（已确认下限，非完整全天总量）' if incomplete else ''),
+             '有成功记录：%d 个账号' % sum(bool(a['success']) for a in report['accounts'].values()),
+             '｜'.join(s + '：' + state for s, state in states.items())]
     for server, values in report['servers'].items():
-        if values['missing']:
-            lines.append('\n%s：数据缺失，已有观测仅供参考' % server)
-        else:
-            lines.append('\n%s：原始采集%d／快照%d；复用%d次(%d条)；任务耗时%.1f分钟' %
-                         (server, values['raw'], values['collected'], values['reused'], values['reused_count'], values['seconds'] / 60))
+        state = states[server]
+        lines.extend(['', '━━ %s · %s ━━' % (server, state)])
+        if state == '采集失败':
+            lines.append('未进入参与阶段；完整快照未提交，部分采集量未计入正式统计。')
+        elif state == '统计未覆盖':
+            lines.append('没有受监测的抽奖运行记录；不能据此判断未运行或零参与。')
+        elif state == '数据缺失':
+            lines.append('同步缺失或数据过期；下列已确认记录仅供参考。')
+        if values['collected'] or values['raw'] or values['reused']:
+            lines.append('共享采集：原始%d → 正式快照%d；复用%d次（%d条）' %
+                         (values['raw'], values['collected'], values['reused'], values['reused_count']))
+        elif state not in ('采集失败', '统计未覆盖', '数据缺失'):
+            lines.append('共享采集：本日未记录新快照提交或复用事件。')
+        if values['runs']: lines.append('任务耗时：' + report_duration(values['seconds']) + '（含冷却，按日切分）')
+        server_issues = {i for run in values['runs'] for i in run.get('issues', [])}
+        for code in sorted(server_issues): lines.append('共同原因：' + guard.MESSAGES.get(code, code))
         for a in sorted(values['accounts'], key=lambda x: x['number'] or 0):
-            state = '观察期' if a['observation'] else '完整' if a['complete'] else '统计不完整/未完成'
-            if not ((set(a['candidates']) - set(a['skipped'])) | set(a['success'])) and a['complete']: state += '，无可参与内容'
-            remaining = str(a['remaining']) if a['remaining'] is not None else '未知'
-            observed = dt.datetime.fromtimestamp(a['observed_at'], NY).strftime('%m-%d %H:%M') if a['observed_at'] else '未知'
-            status = {'running':'任务运行中','success':'任务已完成','partial':'任务部分失败',
-                      'failed':'任务失败','cancelled':'手动取消'}.get(a.get('run_status'),'未观测到运行')
-            lines.append('账号%s(UID%s)：候选%d／成功%d／跳过%d／曾暂缓%d；剩余%s[%s]；处理%.1f分钟；%s；%s' %
-                         (a['number'], a['uid'], len(a['candidates']), len(a['success']), len(a['skipped']), len(a['deferred']), remaining,
-                          observed, a['seconds'] / 60, status, state))
-            if a['issues']: lines.append('关联业务故障：' + ','.join(a['issues']))
-    lines.append('\n采集为服务器共享量，不按账号重复累计；成功为可确认的下限，未知数据不填零。')
-    if report.get('historical_gaps'):
-        lines.append('历史明细存在同步缺口，未补零：' + '、'.join(report['historical_gaps']))
+            owner = identities.get(a['uid'], {})
+            clean = lambda text: ' '.join(str(text).split())[:64]
+            label = '%s号 %s（%s）' % (a['number'], clean(owner.get('name') or '昵称未设置'), clean(owner.get('owner') or '归属未设置'))
+            participating = a.get('participation_seen', False) or bool(a['candidates'] or a['success'])
+            if values['missing']: status = '数据缺失'
+            elif not values['runs']: status = '统计未覆盖'
+            elif not participating:
+                status = '未参与（采集失败）' if state == '采集失败' else '待首轮参与' if a['observation'] and not a['has_run'] else '未观测到参与'
+            elif a['complete']: status = '已完成'
+            else: status = {'running':'运行中','cancelled':'手动取消','failed':'任务失败','partial':'部分失败'}.get(a.get('run_status'), '统计不完整')
+            if participating and a['complete'] and not ((set(a['candidates']) - set(a['skipped'])) | set(a['success'])): status += '，无可参与内容'
+            flags = (' · 观察期' if a['observation'] else '') + (' · 统计不完整' if participating and not a['complete'] else '')
+            lines.extend(['', label + '｜' + status + flags])
+            if not participating and not (a['candidates'] or a['success'] or a['skipped'] or a['deferred']):
+                lines.append('  参与数据：—（未观测，不填零）' + ('｜采集耗时 ' + report_duration(a['seconds']) if a['seconds'] else ''))
+                for code in sorted(set(a['issues']) - server_issues): lines.append('  原因：' + guard.MESSAGES.get(code, code))
+                continue
+            known_zero = participating and a['complete'] and not values['missing']
+            count = lambda items: str(len(items)) if items or known_zero else '—'
+            lines.append('  成功 %s / 候选 %s｜跳过 %s｜曾暂缓 %s' % tuple(count(a[k]) for k in ['success','candidates','skipped','deferred']))
+            remaining = str(a['remaining']) if participating and a['remaining'] is not None else '—'
+            detail = '  剩余队列 ' + remaining
+            if participating and a['observed_at']:
+                detail += '（观测 ' + dt.datetime.fromtimestamp(a['observed_at'], NY).strftime('%m-%d %H:%M') + '）'
+            if a['seconds']:
+                detail += '｜处理 ' + report_duration(a['seconds']) + ('（采集阶段）' if not participating else '')
+            lines.append(detail)
+            for code in sorted(set(a['issues']) - server_issues): lines.append('  原因：' + guard.MESSAGES.get(code, code))
+    lines.extend(['', '说明：— 表示未观测/未知，不代表 0。成功按账号＋动态去重；共享采集不按账号重复累计。',
+                  '观察期不做下降判断；曾暂缓是过程记录，可能随后成功，不与成功数相加。'])
+    if report.get('historical_gaps'): lines.append('历史明细存在同步缺口：' + '、'.join(report['historical_gaps']))
     return '\n'.join(lines)
 
 
@@ -592,7 +647,8 @@ def hub(root, cfg, now=None, fetch=remote):
                 guard.ingest(monitor, dict(run_id='participation-evaluate-' + day, task='participation', server='三台汇总',
                              status='partial' if issues else 'success', issues=issues, accounts=outcomes), now)
                 setmeta(c, 'evaluated:' + day, True)
-            enqueue_notice(monitor, 'participation:daily:' + day, '三台抽奖参与量日报 ' + day, render(report), now)
+            enqueue_notice(monitor, 'participation:daily:' + day, '三台抽奖参与量日报 ' + day,
+                           render(report, guard.read(root / 'wins/config.json', {}).get('owners', {})), now)
         prune(c, now)
 
 
@@ -622,7 +678,7 @@ def main():
         elif a.mode == 'hub': hub(root, cfg)
         else:
             with connect(root / 'metrics/hub.sqlite') as c:
-                print(render(summarize(c, cfg, a.day, time.time())))
+                print(render(summarize(c, cfg, a.day, time.time()), guard.read(root / 'wins/config.json', {}).get('owners', {})))
     return 0
 
 
