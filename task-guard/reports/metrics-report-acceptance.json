@@ -1,0 +1,21 @@
+{
+  "release": "20261031-metrics-report-v1",
+  "source_commit": "5c5258e021c32c3389cd9d6c7f0212a09143ef0c",
+  "archive_sha256": "dcb9775ef1b6c407179809d9a4ccb258604c8430850ca14465408d0317737973",
+  "manifest_sha256": "5074407cd4ec4965b60f25bc0cff0a959a24d3a497f7ced44c1d6ee2e18dac8b",
+  "scope": ["Plain-text overview and server/account sections", "Private UID ownership labels resolved only while rendering", "Unobserved values are unknown rather than zeros", "Accounts without participation do not inherit server completion", "Group shared failures and translate reason codes"],
+  "offline_checks": {"required_release_suite_passed": true, "regressions": ["New account waits for first participation", "Uncovered server never renders observed zero participation", "Shared failure shown once", "Confirmed success retained during partial failure", "Cross-day participation span remains observed"]},
+  "read_only_historical_comparison": {"statistics_day": "2026-10-30", "confirmed_success": 225, "account_counts_and_eligibility_unchanged": true, "server_counts_and_duration_unchanged": true, "used_disposable_database_copies": true},
+  "deployment_order": ["wuhan", "singapore", "usa"],
+  "servers": {
+    "wuhan": {"actual_files_verified": 952, "configuration_unchanged": true, "concurrent_progress_changes": [], "health_passed": true},
+    "singapore": {"actual_files_verified": 952, "configuration_unchanged": true, "concurrent_progress_changes": [], "health_passed": true},
+    "usa": {"actual_files_verified": 952, "configuration_unchanged": true, "concurrent_progress_changes": [], "health_passed": true}
+  },
+  "business_jobs_started_or_stopped": false,
+  "test_pushes_sent": 0,
+  "delivered_daily_reports_replayed": false,
+  "baseline_and_counting_rules_changed": false,
+  "rollback": "Use unified rollback to previous immutable release 20261031-wins-title-v1; retain account configuration, all business progress, statistics databases, winner state and durable outbox",
+  "publication": "Later documentation commit does not change the payload pinned by source_commit"
+}
