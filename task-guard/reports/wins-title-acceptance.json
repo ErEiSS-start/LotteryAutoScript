@@ -1,0 +1,20 @@
+{
+  "release": "20261031-wins-title-v1",
+  "source_commit": "5dd526c840ba3ad09caa9cf615d3fe1419e2e282",
+  "archive_sha256": "ca8ddb3d809e17ac3713f4ba0d6cc2405f5f04823df7e85808925e7d71e46910",
+  "manifest_sha256": "ee35f332fb8cb17d7bf0d2d677e08c8d4875862e97cf397807ef77df460f64b1",
+  "scope": "Classification-first notification title and body formatting only",
+  "offline_release_checks": {"python_tests": 45, "node_test_programs": 11, "dotnet_result_tests": 1, "passed": true},
+  "synthetic_preview": {"long_name_preserves_category_prefix": true, "clear_and_suspected_checked": true, "body_classification_first_line": true, "test_pushes_sent": 0},
+  "pending_notices": "Existing dispatch re-renders current record before delivery; no sent notices were reset or replayed",
+  "deployment_order": ["wuhan", "singapore", "usa"],
+  "servers": {
+    "wuhan": {"actual_files_verified": 952, "configuration_unchanged": true, "progress_changes": [], "health_passed": true},
+    "singapore": {"actual_files_verified": 952, "configuration_unchanged": true, "progress_changes": [], "health_passed": true},
+    "usa": {"actual_files_verified": 952, "configuration_unchanged": true, "progress_changes": [], "health_passed": true}
+  },
+  "business_jobs_started_or_stopped": false,
+  "live_read_only_web": {"anonymous_status": 401, "authenticated_status": 200, "enabled_accounts": 14, "servers": 3, "owner_groups": 6, "sync_warnings": [], "secondary_redirect_status": 307},
+  "rollback": "Select previous immutable release 20261030-wins-v3 with the unified rollback command; retain winner state, delivery clocks, account settings and business progress",
+  "publication": "This report is a later documentation commit; the deployed payload remains pinned to source_commit"
+}

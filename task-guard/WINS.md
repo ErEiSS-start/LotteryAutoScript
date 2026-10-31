@@ -1,10 +1,17 @@
 # Winner classification and reliable delivery
 
-Accepted release: `20261030-wins-v3`, source commit
-`9af041e480525d78e968723833da547e175a330b`. All three servers passed actual hash
+Accepted release: `20261031-wins-title-v1`, source commit
+`5dd526c840ba3ad09caa9cf615d3fe1419e2e282`. All three servers passed actual hash
 verification of 952 payload files. Live HTTPS verified the existing authenticated
 entry, 14 enabled accounts, three servers and six owner groups with no sync
-warnings. Sanitized evidence is in `reports/wins-acceptance.json`.
+warnings. Original feature evidence is in `reports/wins-acceptance.json`; the
+notification preview update is recorded in `reports/wins-title-acceptance.json`.
+
+Notification titles begin with `【明确中奖】` or `【疑似中奖】`, followed by
+owner, account name and server, so long names cannot hide the classification in
+short previews. The first body line also states the classification. Pending
+notices are formatted from current state at dispatch; this does not resend
+delivered notices or change reminder clocks, classification or deduplication.
 
 This release covers current local records and future scheduled checks. It does
 not traverse already-read history, mark platform messages read, add AI calls,
