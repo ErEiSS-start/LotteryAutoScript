@@ -1,5 +1,11 @@
 # Winner classification and reliable delivery
 
+Accepted release: `20261030-wins-v3`, source commit
+`9af041e480525d78e968723833da547e175a330b`. All three servers passed actual hash
+verification of 952 payload files. Live HTTPS verified the existing authenticated
+entry, 14 enabled accounts, three servers and six owner groups with no sync
+warnings. Sanitized evidence is in `reports/wins-acceptance.json`.
+
 This release covers current local records and future scheduled checks. It does
 not traverse already-read history, mark platform messages read, add AI calls,
 rerun jobs or change schedules, account allocation or participation settings.

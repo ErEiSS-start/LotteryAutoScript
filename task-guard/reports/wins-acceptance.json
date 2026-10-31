@@ -1,0 +1,56 @@
+{
+  "accepted_date": "2026-10-31",
+  "timezone": "America/New_York",
+  "release_id": "20261030-wins-v3",
+  "source_git_commit": "9af041e480525d78e968723833da547e175a330b",
+  "archive_sha256": "1ec7e293c21eaf90cf5324ad0a2d77f4c66ceb057c10801c20dcc1fedd84f4f2",
+  "manifest_sha256": "194f917221b238e475f8ca4c6fc429957f2f8f665f6d5a44c154928ee9ff05a3",
+  "deployment_order": ["wuhan", "singapore", "usa"],
+  "all_servers": {
+    "same_archive_and_source": true,
+    "actual_payload_files_verified": 952,
+    "configuration_unchanged": true,
+    "progress_changes_during_deploy": [],
+    "business_jobs_started_by_deployment": false,
+    "business_jobs_stopped_by_deployment": false,
+    "local_winner_import_fresh": true,
+    "monitor_and_statistics_timers_active": true,
+    "python_offline_tests_passed": 45
+  },
+  "build_tests": {
+    "explicit_node_programs_passed": 11,
+    "bili_structured_result_tests_passed": 1,
+    "fake_platform_interactions_only": true,
+    "test_prize_pushes_sent": false,
+    "release_bytecode_regression_passed": true,
+    "public_archive_rollback_filter_passed": true,
+    "delivery_receipt_and_rollback_clock_passed": true
+  },
+  "live_https": {
+    "anonymous_api_status": 401,
+    "authenticated_api_status": 200,
+    "enabled_accounts": 14,
+    "servers": 3,
+    "owner_groups": 6,
+    "synchronization_warnings": [],
+    "secondary_entry_redirect_status": 307,
+    "private_message_bodies_printed": false
+  },
+  "gateway": {
+    "viewer_no_new_privileges": true,
+    "socket_mode": "0660",
+    "socket_owner": "root",
+    "socket_group": "qinglong-log-viewer",
+    "sudo_granted": false,
+    "gateway_service_exit_status": 0,
+    "hub_service_exit_status": 0,
+    "viewer_service_exit_status": 0
+  },
+  "restricted_exports": [
+    {"server": "wuhan", "enabled_accounts": 4, "arbitrary_commands": "rejected", "configuration_read": "rejected", "pty": "denied", "forwarding": "denied"},
+    {"server": "singapore", "enabled_accounts": 5, "arbitrary_commands": "rejected", "configuration_read": "rejected", "pty": "denied", "forwarding": "denied"}
+  ],
+  "manual_deployment_only": true,
+  "default_branch_changed": false,
+  "note": "Later documentation/report commits do not change the deployed payload pinned above. Existing schedules perform subsequent business checks."
+}
