@@ -26,6 +26,7 @@ TESTS = ['task-guard/test_lottery.cjs', 'task-guard/test_metrics.cjs',
          'test/check_notification.test.js', 'test/pending_win_store.test.js',
          'test/env_merge.test.js', 'test/shared_state_permission.test.js']
 TESTS += ['test/winner_v4.test.js', 'integrations/winner-viewer/test/server.test.js','integrations/winner-viewer/test/gateway.test.js']
+TESTS += ['test/offline/bili-api.js']
 TOOLS = ['release_manager.py', 'guard.py', 'metrics.py', 'wins.py', 'wins_deploy.py','wins_compat.cjs']
 
 def digest(p):

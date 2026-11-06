@@ -23,6 +23,7 @@ MESSAGES = {
     'ACCOUNT_EXCEPTION': '账号执行异常', 'ACCOUNT_STOPPED': '账号异常停止',
     'DISCOVERY_INCOMPLETE': '采集未生成完整有效快照',
     'CHECK_INCOMPLETE': '中奖扫描未完整完成',
+    'FOLLOW_LIST_INCOMPLETE': '关注列表未完整读取',
     'CLEAR_FAILED': '清理请求重试耗尽', 'DAILY_FAILED': '每日升级关键步骤失败',
     'WATCH_FAILED': '观看视频失败', 'DONATE_FAILED': '投币接口异常',
     'RESULT_MISSING': '任务结束但没有可靠执行结果',
