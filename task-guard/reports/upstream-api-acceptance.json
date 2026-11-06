@@ -1,0 +1,42 @@
+{
+  "release": "20261106-upstream-api-v1",
+  "source_commit": "d6bc6865b0f5a8f088bec1d2273b6be1b923eca5",
+  "upstream_commit": "accfb8ba5502688b96fcac6f47d58042b2fcadba",
+  "upstream_pull_requests": [
+    494,
+    495
+  ],
+  "archive_sha256": "b7e7c61582047825dde9f84a6d4d7a9b7a990a5e928b3b9aefe04b2ac46636cb",
+  "manifest_sha256": "115f10614927c4456c79c1f38337057580c61d006d535f1d80c44f82c21bec0b",
+  "offline_release_suite_passed": true,
+  "servers": {
+    "wuhan": {
+      "actual_files_verified": 952,
+      "configuration_unchanged": true,
+      "concurrent_progress_changes": [],
+      "health_passed": true,
+      "business_jobs_started_or_stopped": false
+    },
+    "singapore": {
+      "actual_files_verified": 952,
+      "configuration_unchanged": true,
+      "concurrent_progress_changes": [],
+      "health_passed": true,
+      "business_jobs_started_or_stopped": false
+    },
+    "usa": {
+      "actual_files_verified": 952,
+      "configuration_unchanged": true,
+      "concurrent_progress_changes": [],
+      "health_passed": true,
+      "business_jobs_started_or_stopped": false
+    }
+  },
+  "winner_viewer": {
+    "authenticated_status": 200,
+    "server_count": 3,
+    "sync_warnings": []
+  },
+  "live_repost_verified": false,
+  "rollback_previous_release": "20261031-metrics-report-v1"
+}
