@@ -1,0 +1,42 @@
+{
+  "release": "20261106-task-recovery-v1",
+  "source_commit": "214d1560180273c30d629890e4c7ddd8a7fa8567",
+  "archive_sha256": "4eca7f3c73753b2b6a86268ebdf8dfe7cc82131ce17742e4046f36c54bfbadd2",
+  "manifest_sha256": "6bde04ad855148b1fa7f08df90985b1af27d9701e7a06e2fadbdadf0725be091",
+  "offline_release_suite_passed": true,
+  "coverage": [
+    "Comment limit pauses the account for the task and preserves its queue",
+    "Distinct comment restriction and account-verification outcomes",
+    "Missing cleanup group causes no creation and stale group is rechecked once",
+    "Committed snapshot recovers a discovery alert once during an active task"
+  ],
+  "servers": {
+    "wuhan": {
+      "actual_files_verified": 952,
+      "configuration_unchanged": true,
+      "concurrent_progress_changes": [],
+      "health_passed": true
+    },
+    "singapore": {
+      "actual_files_verified": 952,
+      "configuration_unchanged": true,
+      "concurrent_progress_changes": [],
+      "health_passed": true
+    },
+    "usa": {
+      "actual_files_verified": 952,
+      "configuration_unchanged": true,
+      "concurrent_progress_changes": [],
+      "health_passed": true
+    }
+  },
+  "separate_manual_stop": {
+    "server": "wuhan",
+    "status": "cancelled",
+    "remaining": 377,
+    "queue_hash_unchanged": true
+  },
+  "winner_viewer_authenticated_status": 200,
+  "live_repost_verified": false,
+  "rollback_previous_release": "20261106-upstream-api-v1"
+}
