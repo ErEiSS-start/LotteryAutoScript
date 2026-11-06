@@ -46,12 +46,20 @@ async function scenario(mode, failures, discovery = true, accounts = [1,2]) {
     const result=reporter(); result.account({COOKIE:'DedeUserID=123; SESSDATA=must-not-persist;',NUMBER:3});result.warning('SHARE_RESTRICTED');result.warning('INSUFFICIENT_COINS');result.warning('PROTECTED_COINS');assert.equal(result.finish(),0);
     assert(!fs.readFileSync(process.env.TASK_GUARD_RESULT_PATH,'utf8').includes('SESSDATA'));
     for(const code of ['CHECK_INCOMPLETE','CLEAR_FAILED']) {const r=reporter();r.account({COOKIE:'DedeUserID=1;',NUMBER:1});r.fail(code,code==='CLEAR_FAILED'?'clear':'check');assert.equal(r.finish(),1);}
-    for (const kind of ['empty','deleted','mutation-failed','page-failed','partition-failed']) {
+    for (const kind of ['empty','deleted','mutation-failed','page-failed','partition-failed','missing-group','stale-group','stale-group-failed']) {
         const r=reporter();r.account({COOKIE:'DedeUserID=1;',NUMBER:1});
-        let mutations=0;
+        let mutations=0, lookups=0, memberReads=0;
         const config={search_wait:0,clear_white_list:'',clear_max_day:0,clear_quick_remove_attention:false,
             clear_remove_dynamic:true,clear_remove_attention:true,clear_remove_delay:0,clear_dynamic_type:1,clear_partition:'fixture',get_partition_wait:0};
-        const bili={checkMyPartition:async()=>kind==='partition-failed'?undefined:1,getPartitionUID:async(_,page)=>page===1?[2]:[],
+        const bili={checkMyPartition:async(_name,options)=>{
+            assert.equal(options.createIfMissing,false);
+            lookups++;
+            return kind==='partition-failed'?undefined:kind==='missing-group'?null:lookups;
+        },getPartitionUID:async(tag,page)=>{
+            memberReads++;
+            if (kind==='stale-group-failed' || (kind==='stale-group' && tag===1)) return null;
+            return page===1?[2]:[];
+        },
             rmDynamic:async()=>{mutations++;return kind!=='mutation-failed';},cancelAttention:async()=>true};
         const utils={log,delay:async()=>{},infiniteNumber:function*(){yield 0;},retryfn:async(n,fail,fn)=>{let v;for(let i=0;i<n;i++){v=await fn();if(!fail.includes(v))return v;}return v;}};
         const source=fs.readFileSync(path.join(sourceRoot,'lib/clear.js'),'utf8');
@@ -67,6 +75,8 @@ async function scenario(mode, failures, discovery = true, accounts = [1,2]) {
         vm.runInNewContext(source,ctx);await ctx.module.exports.clear();
         assert.equal(r.finish(),kind.endsWith('failed')?1:0,kind);
         if(kind==='mutation-failed')assert.equal(mutations,3);
+        if(kind==='missing-group')assert.equal(memberReads,0);
+        if(kind.startsWith('stale-group'))assert.equal(lookups,2);
     }
-    fs.rmSync(tmp,{recursive:true});console.log('Lottery structured outcomes: 12 scenarios passed; no network/business actions');
+    fs.rmSync(tmp,{recursive:true});console.log('Lottery structured outcomes and clear group recovery passed (offline)');
 })().catch(e=>{console.error(e);process.exitCode=1;});

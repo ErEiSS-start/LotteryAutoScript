@@ -24,6 +24,9 @@ MESSAGES = {
     'DISCOVERY_INCOMPLETE': '采集未生成完整有效快照',
     'CHECK_INCOMPLETE': '中奖扫描未完整完成',
     'FOLLOW_LIST_INCOMPLETE': '关注列表未完整读取',
+    'COMMENT_REQUEST_REJECTED': '评论请求被拒绝（-412）',
+    'COMMENT_ACCOUNT_UNVERIFIED': '账号未转正（-107）',
+    'COMMENT_LIMIT': '达到评论发送上限，候选保留到下次任务',
     'CLEAR_FAILED': '清理请求重试耗尽', 'DAILY_FAILED': '每日升级关键步骤失败',
     'WATCH_FAILED': '观看视频失败', 'DONATE_FAILED': '投币接口异常',
     'RESULT_MISSING': '任务结束但没有可靠执行结果',
@@ -103,6 +106,9 @@ def sanitize_result(value):
                              status='failed' if records else 'success', issues=records,
                              warnings=[str(w)[:60] for w in row.get('warnings', []) if str(w).replace('_', '').isalnum()],
                              passed=[str(s)[:40] for s in row.get('passed', [])]))
+    global_passed = value.get('passed', [])
+    if isinstance(global_passed, list) and 'discovery' in global_passed:
+        accounts.append(dict(account='global', number=None, status='success', issues=[], passed=['discovery'], warnings=[]))
     for item in value.get('issues', []):
         if item.get('code') in MESSAGES:
             accounts.append(dict(account='global', number=None, status='failed',
@@ -248,10 +254,17 @@ def ingest(c, state, now):
             continue
         account = account_results.get(row['account'])
         passed = bool(account and (account['status'] == 'success' or row['stage'] in account.get('passed', [])))
+        if row['stage'] == 'comment':
+            passed = bool(account and 'comment' in account.get('passed', []))
         if row['account'] == 'global':
-            passed = state['status'] == 'success' or ('global', row['stage']) in {
+            stage_passed = ('global', row['stage']) in {
                 (a['account'], s) for a in state.get('accounts', []) for s in a.get('passed', [])}
-        changed = any(i['account'] == row['account'] and i['stage'] == row['stage'] for i in fresh)
+            passed = stage_passed or (row['code'] != 'DISCOVERY_INCOMPLETE' and state['status'] == 'success')
+        specific_comment_failure = row['code'] == 'ACCOUNT_STOPPED' and any(
+            account == row['account'] and stage == 'comment' for account, stage, _ in current)
+        if specific_comment_failure:
+            passed = False
+        changed = specific_comment_failure or any(i['account'] == row['account'] and i['stage'] == row['stage'] for i in fresh)
         if not passed and not changed:
             continue
         c.execute('update faults set active=0 where task=? and account=? and stage=? and code=?',
@@ -485,6 +498,13 @@ def watch(root, cfg, now=None, sender=push):
                 if state['status'] != 'running':
                     atomic(path, outcome)
                 ingest(c, outcome, now)
+            elif state['task'] == 'start' and state['status'] == 'running':
+                result = read(root / 'results' / (state['run_id'] + '.json'), {})
+                if (isinstance(result, dict) and result.get('run_id') == state['run_id'] and isinstance(result.get('passed'), list)
+                        and 'discovery' in result['passed']):
+                    # Process the committed snapshot separately from the eventual participation result.
+                    ingest(c, dict(state, run_id=state['run_id'] + ':discovery', status='partial',
+                                   issues=[], accounts=[dict(account='global', status='success', passed=['discovery'])]), now)
         if cfg.get('wins_enabled'):
             try:
                 import wins

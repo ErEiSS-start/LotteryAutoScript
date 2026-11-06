@@ -194,6 +194,7 @@ async function runRoundRobin(accounts, localhost) {
                 taskResult.fail('DISCOVERY_INCOMPLETE', 'discovery', true);
                 return '本轮没有生成有效固定快照，已保留正式文件和可恢复断点且不会开始参与';
             }
+            taskResult.passed('discovery', true);
         }
 
         if (Number(firstAccount.WAIT) > 0) {
@@ -227,7 +228,7 @@ async function runRoundRobin(accounts, localhost) {
                 if (!cookieValid) {
                     log.warn('轮转参与', `帐号${account.NUMBER} Cookie失效，停止该帐号后续轮次`);
                 } else if (result.errorStatus) {
-                    taskResult.fail('ACCOUNT_STOPPED', 'start');
+                    if (taskResult.currentStatus() !== 'failed') taskResult.fail('ACCOUNT_STOPPED', 'start');
                     log.warn('轮转参与', `帐号${account.NUMBER}遇到停止状态${result.errorStatus}，停止该帐号后续轮次`);
                 } else if (result.needsAnotherRound) {
                     nextRound.push(account);

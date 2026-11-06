@@ -167,7 +167,8 @@ def collect(root, cfg, now=None):
             data = {k: state.get(k) for k in ['status', 'started_at', 'finished_at', 'log_path']}
             data.update(issues=issues, metrics_enabled=True, complete=not missing)
             data['accounts'] = [dict(uid=a['account'], number=a.get('number'), status=a['status'],
-                                    issues=sorted({i['code'] for i in a['issues']}))
+                                    issues=sorted({i['code'] for i in a['issues']}
+                                                  | (set(a.get('warnings', [])) & {'COMMENT_LIMIT'})))
                                 for a in state.get('accounts', []) if a['account'].isdecimal() and a['account'] != '0']
             changed(c, cfg['server'], 'run-' + path.stem, 'run', data, now, state['run_id'])
         setmeta(c, 'collected_at', now)
@@ -560,6 +561,7 @@ def render(report, identities=None):
             elif not values['runs']: status = '统计未覆盖'
             elif not participating:
                 status = '未参与（采集失败）' if state == '采集失败' else '待首轮参与' if a['observation'] and not a['has_run'] else '未观测到参与'
+            elif 'COMMENT_LIMIT' in a['issues']: status = '已暂停（评论限额）'
             elif a['complete']: status = '已完成'
             else: status = {'running':'运行中','cancelled':'手动取消','failed':'任务失败','partial':'部分失败'}.get(a.get('run_status'), '统计不完整')
             if participating and a['complete'] and not ((set(a['candidates']) - set(a['skipped'])) | set(a['success'])): status += '，无可参与内容'

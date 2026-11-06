@@ -85,6 +85,26 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(self.c.execute('select active from faults').fetchone()[0],1)
         self.assertEqual(self.c.execute('select count(*) from outbox').fetchone()[0],1)
 
+    def test_discovery_recovers_once_when_running_snapshot_is_committed(self):
+        failure = dict(self.state(1, failures=[g.issue('DISCOVERY_INCOMPLETE', 'discovery')]), task='start')
+        g.ingest(self.c, failure, 0)
+        sent = []
+        sender = lambda *args: sent.append(args) or True
+        g.drain(self.c, self.root.parent, 0, sender)
+        running = dict(self.state(2, status='running'), task='start', started_at=60, cron_id=7)
+        g.atomic(self.root / 'runs' / '2.json', running)
+        result_path = self.root / 'results' / '2.json'
+        g.atomic(result_path, dict(run_id='2', passed=[]))
+        with patch.object(g, 'missing_runs'), patch.object(g, 'resolve_external', return_value=None):
+            g.watch(self.root, self.cfg, 60, sender)
+            self.assertEqual(len(sent), 1)
+            g.atomic(result_path, dict(run_id='2', passed=['discovery']))
+            g.watch(self.root, self.cfg, 120, sender)
+            g.watch(self.root, self.cfg, 180, sender)
+        self.assertEqual(len(sent), 2)
+        self.assertIn('已恢复', sent[-1][1])
+        self.assertEqual(self.c.execute('select active from faults').fetchone()[0], 0)
+
     def test_external_dead_alive_manual_and_container(self):
         state = dict(run_id='x',task='check',cron_id=7,started_at=0,heartbeat=0,status='running')
         with patch.object(g,'ql_instance',return_value=None), patch.object(g,'process_alive',return_value=False):

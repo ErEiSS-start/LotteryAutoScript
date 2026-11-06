@@ -96,11 +96,25 @@ const page = (ids, total) => ({ code: 0, data: { total, list: ids.map(mid => ({ 
     }
     setup({ code: 12015 });
     assert.strictEqual(await bili.sendChat('1', '测试', 17), 4);
+    for (const [response, expected] of [[{ code: 12014 }, 13], [{ code: -412 }, 14],
+        ['[响应错误]HTTP状态码: 412', 14], [{ code: -107 }, 15]]) {
+        setup(response);
+        assert.strictEqual(await bili.sendChatWithOcr('1', '测试', 17), expected);
+        assert.strictEqual(requests.length, 1);
+    }
     setup({ code: 0, data: { need_captcha: true, url: 'https://example.com/captcha' } });
     delete process.env.ENABLE_CHAT_CAPTCHA_OCR;
     assert.strictEqual(await bili.sendChatWithOcr('1', '测试', 17), 4);
     setup('HTTP 404');
     assert.strictEqual(await bili.sendChat('1', '测试', 17), 1);
+
+    setup({ code: 0, data: [] });
+    assert.strictEqual(await bili.checkMyPartition(undefined, { createIfMissing: false }), null);
+    assert.strictEqual(requests.length, 1);
+    setup({ code: 22104 });
+    assert.strictEqual(await bili.getPartitionUID(1, 1), null);
+    setup({ code: -412 });
+    assert.strictEqual(await bili.getPartitionUID(1, 1), undefined);
 
     const originalGetAttentionList = bili.getAttentionList;
     const originalEmit = eventBus.emit;
@@ -120,6 +134,31 @@ const page = (ids, total) => ({ code: 0, data: { total, list: ids.map(mid => ({ 
     assert.strictEqual(started, true);
     assert.strictEqual(monitor.attentionList.has('123'), true);
     assert.strictEqual(monitor.attentionList.has('12'), false);
+    const { RoundRobinQueue } = require('../../lib/helper/round_robin_queue');
+    const originalLoadQueue = RoundRobinQueue.prototype.loadOrCreate;
+    const originalWriteQueue = RoundRobinQueue.prototype.atomicWrite;
+    const pending = [{ dyid: '123456789012345678', uid: [], drawtime: -1 }, { dyid: '223456789012345678', uid: [], drawtime: -1 }];
+    let attempted = 0;
+    RoundRobinQueue.prototype.loadOrCreate = async function () {
+        this.state = { pending, stats: { initial: 2, successful: 0, skipped: 0 } };
+        return { created: false };
+    };
+    RoundRobinQueue.prototype.atomicWrite = () => { throw new Error('Paused queue must not be rewritten'); };
+    process.env.LOTTERY_SHARED_ONLY = '1';
+    try {
+        globals.set('lotteryBatchResult', undefined);
+        const limited = new Monitor(['UIDs', 1]);
+        limited.go = async () => { attempted++; return 1013; };
+        assert.strictEqual(await limited.startLottery(), 1013);
+        assert.strictEqual(attempted, 1);
+        assert.strictEqual(globals.get('lotteryBatchResult').needsAnotherRound, false);
+        assert.strictEqual(globals.get('lotteryBatchResult').remaining, 2);
+        assert.strictEqual(pending.length, 2);
+    } finally {
+        delete process.env.LOTTERY_SHARED_ONLY;
+        RoundRobinQueue.prototype.loadOrCreate = originalLoadQueue;
+        RoundRobinQueue.prototype.atomicWrite = originalWriteQueue;
+    }
     bili.getAttentionList = originalGetAttentionList;
     eventBus.emit = originalEmit;
     console.log('offline Bilibili API tests passed');
