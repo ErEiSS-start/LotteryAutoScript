@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -48,7 +49,7 @@ class ReleaseTests(unittest.TestCase):
                    'tools/release_manager.py': Path(r.__file__).read_text()}
         for filename, value in content.items():
             target = p / filename; target.parent.mkdir(parents=True, exist_ok=True); target.write_text(value)
-        r.atomic(p / 'release.json', dict(schema=1, release_id=name, git_commit='a' * 40,
+        r.atomic(p / 'release.json', dict(schema=1, release_id=name, git_commit='a' * 40, features={'runtime_inspection': True},
                  bili_baseline=r.BASELINE, tests={'passed': True}, files=r.files(p)))
         archive = self.base / (name + '.tar.gz')
         with tarfile.open(archive, 'w:gz') as t:
@@ -117,6 +118,19 @@ class ReleaseTests(unittest.TestCase):
             member = tarfile.TarInfo('../escape'); member.size = 1
             t.addfile(member, io.BytesIO(b'x'))
         with self.assertRaises(ValueError): r.unpack(archive, self.base / 'out')
+
+    def test_relative_release_entry_survives_different_mount_root(self):
+        a = self.package('portable'); r.deploy(a)
+        self.assertFalse((self.root / 'current').readlink().is_absolute())
+        view = self.base / 'container-data'
+        shutil.copytree(self.data, view, symlinks=True)
+        r.runtime_selection(view, view / 'task-guard', {'server': 'TEST', 'tasks': {}})
+        # An absolute host link must fail explicitly rather than execute a legacy wrapper.
+        (view / 'task-guard/current').unlink()
+        (view / 'task-guard/current').symlink_to(r.current_dir(self.root))
+        result = subprocess.run([sys.executable, str(view / 'task-guard/release_entry.py'), 'start', '--inspect'], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('refusing legacy fallback', result.stderr)
 
     def test_host_resolver_preserves_import_contract(self):
         code = 'def marker(): return "imported"\nif __name__ == "__main__": raise SystemExit(64)\n'

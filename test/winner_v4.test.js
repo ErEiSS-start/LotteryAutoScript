@@ -11,6 +11,16 @@ assert.strictEqual(classify({source:'at',accountUid:'10001',content:'中奖名�
 assert.strictEqual(category('您的大会员兑换码为 ABCD-1234'),'review');
 assert.strictEqual(category('【必得红包】支付宝扫码领红包'),'ignored');
 assert.strictEqual(category('恭喜中奖，请扫码领取红包'),'winner');
+for (const content of [
+  '[自动回复] 感谢关注！主要分享有趣的数码产品',
+  '能获得你的关注，是我的缘分，进粉丝群一起交流',
+  '欢迎关注，群内有不定期抽奖，中奖率很高',
+  '欢迎关注！游戏全平台正式上线，下载登录游戏福利好礼送不停',
+  '这里提供数码产品介绍',
+]) assert.strictEqual(classify({...current, content, keywords:['中奖|获得|填写|提供|收货地址|支付宝账号|码|大会员']}).category, 'ignored');
+assert.strictEqual(category('你预约的直播已开始，预约主题：今天开奖'), 'reservation');
+assert.strictEqual(category('感谢关注！恭喜你抽中手机，请提供收货地址'), 'winner');
+assert.strictEqual(category('您的游戏激活码为 ABCD-1234'), 'review');
 assert.strictEqual(category('恭喜您中奖，请联系@客服领取奖品'),'winner');
 assert.strictEqual(classify({...current,content:'恭喜@我的账号 获得手机',mentions:[{mid:'99999',nickname:'我的账号'}]}).category,'ignored');
 assert.strictEqual(classify({...current,source:'at',content:'恭喜中奖'}).category,'review');

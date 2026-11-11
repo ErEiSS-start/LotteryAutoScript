@@ -205,7 +205,13 @@ def collect(root, cfg, c, now):
                 c.execute('insert into winner_seen values(?)', (identity,))
         c.execute('insert or replace into winner_sources values(?,?)', (p.name, digest))
     aliases={}
-    for saved in records(c):aliases.setdefault(saved['accountUid'],set()).add(saved.get('accountName',''))
+    candidate_keys = {key(row) for row in candidates}
+    for saved in records(c):
+        aliases.setdefault(saved['accountUid'],set()).add(saved.get('accountName',''))
+        if (saved.get('server') == cfg['server'] and saved.get('ruleVersion', 0) < 2
+                and key(saved) not in candidate_keys):
+            candidates.append(saved)
+            candidate_keys.add(key(saved))
     for row in candidates:
         uid=str(row.get('accountUid',''));known=set(aliases.get(uid,set()))
         known.add(owner_map.get(uid,{}).get('name',''))

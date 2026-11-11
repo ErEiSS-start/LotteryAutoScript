@@ -149,7 +149,7 @@ def build(a):
                 package = read(p)
                 if package.get('name') and package.get('version'): dependencies[str(p.parent.relative_to(lottery / 'node_modules'))] = package['version']
             except (ValueError, OSError): pass
-        m = dict(schema=1, release_id=release_id, git_commit=a.commit, bili_baseline=BASELINE, features={'wins': True},
+        m = dict(schema=1, release_id=release_id, git_commit=a.commit, bili_baseline=BASELINE, features={'wins': True, 'runtime_inspection': True},
                  bili_patch_sha256=digest(patch), package_lock_sha256=digest(lottery / 'package-lock.json'),
                  runtime=dict(node_min_major=18, python_min='3.11', dotnet_major=10, platform='linux', architecture='x86_64'),
                  dependencies=dependencies, tests=dict(passed=True, node=TESTS, python='test_*.py', bili='StructuredTaskResultTests'), files=files(payload))
@@ -251,6 +251,7 @@ def shim(root, filename):
             'sys.dont_write_bytecode=True\n'
             'root=Path(__file__).resolve().parent\n'
             'current=(root/"current").resolve()\n'
+            'if not (current/"release.json").is_file() and current != root/"legacy-tools": raise RuntimeError("Selected release is unavailable")\n'
             'directory=current/"tools" if (current/"release.json").is_file() else root/"legacy-tools"\n'
             'sys.path.insert(0,str(directory))\n'
             'globals().update(runpy.run_path(str(directory/' + repr(filename) + '),run_name=__name__))\n')
@@ -264,9 +265,13 @@ current=(root/'current').resolve()
 task=sys.argv[1]
 names={'start':'LotteryAutoScript_start.sh','check':'LotteryAutoScript_check.sh','clear':'LotteryAutoScript_clear.sh','daily':'TaskGuard_daily.sh'}
 if task not in names: raise SystemExit(64)
-if not (current/'release.json').is_file():
+if current == root/'legacy-tools':
     os.execv('/bin/bash',['bash',str(root/'legacy-tools/scripts'/names[task])])
-os.execv(sys.executable,[sys.executable,str(current/'tools/release_manager.py'),'launch','--data',str(root.parent),'--release-dir',str(current),'--task',task])
+if current.parent != root/'unified-releases' or not (current/'release.json').is_file():
+    raise SystemExit('Selected release is unavailable; refusing legacy fallback')
+extra=sys.argv[2:]
+if extra not in ([], ['--inspect']): raise SystemExit(64)
+os.execv(sys.executable,[sys.executable,str(current/'tools/release_manager.py'),'launch','--data',str(root.parent),'--release-dir',str(current),'--task',task]+extra)
 '''
 
 def bootstrap(data, root, cfg):
@@ -290,7 +295,7 @@ def bootstrap(data, root, cfg):
 def switch(root, target):
     temp = root / 'current.release-new'
     if temp.is_symlink(): temp.unlink()
-    temp.symlink_to(target, target_is_directory=True)
+    temp.symlink_to(os.path.relpath(target, root), target_is_directory=True)
     os.replace(temp, root / 'current')
 
 def deployment_lock(root):
@@ -303,6 +308,24 @@ def deployment_lock(root):
 def current_dir(root):
     p = root / 'current'
     return p.resolve() if p.is_symlink() else None
+
+
+def runtime_selection(data, root, cfg):
+    target = current_dir(root)
+    manifest = read(target / 'release.json')
+    if not manifest.get('features', {}).get('runtime_inspection'):
+        code = "import pathlib,sys; p=(pathlib.Path(sys.argv[1])/'current').resolve(); assert (p/'release.json').is_file(); print(p)"
+        selected = runtime_run(['python3', '-c', code, runtime_path(root, data, cfg)], cfg).strip()
+        if selected != runtime_path(target, data, cfg): raise ValueError('Runtime release path is unavailable')
+        return
+    for task in TASKS:
+        raw = runtime_run(['python3', runtime_path(root, data, cfg) + '/release_entry.py', task, '--inspect'], cfg)
+        selected = json.loads(raw)
+        expected = {name: manifest['files'][name] for name in selected['files']}
+        if (selected['release'] != manifest['release_id'] or selected['git_commit'] != manifest['git_commit']
+                or selected['files'] != expected
+                or selected['release_dir'] != runtime_path(target, data, cfg)):
+            raise ValueError('Runtime selected different release: ' + task)
 
 def restore_entries(backup, data, root):
     for name in ['guard.py', 'metrics.py', 'release_entry.py']:
@@ -390,6 +413,7 @@ def deploy(a):
             if cfg.get('wins_enabled') and (target / 'tools/wins_deploy.py').exists():
                 run(['python3', target / 'tools/wins_deploy.py', 'enable', '--data', data, '--backup', backup])
             if configuration(data) != before: raise ValueError('Business configuration changed during deployment')
+            runtime_selection(data, root, cfg)
             healthy = health(data, root, cfg)
             verify(target, a.release)
         except BaseException:
@@ -437,7 +461,8 @@ def status(a):
         if (root / filename).read_text() != selected['shim'](root, filename): raise ValueError('Host resolver drift: ' + filename)
     if (root / 'release_entry.py').read_text() != selected['entry_script'](): raise ValueError('Task resolver drift')
     if cfg.get('unified_release') != m['release_id']: raise ValueError('Configured release mismatch')
-    report = dict(server=cfg['server'], release=m['release_id'], git_commit=m['git_commit'],
+    runtime_selection(data, root, cfg)
+    report = dict(server=cfg['server'], release=m['release_id'], git_commit=m['git_commit'], runtime_verified=True,
                   manifest_sha256=digest(target / 'release.json'), actual_files_verified=len(m['files']),
                   health=health(data, root, cfg), compatibility=cfg.get('wins_rollback_compat'),passed=True)
     print(json.dumps(report, ensure_ascii=False))
@@ -499,6 +524,14 @@ def launch(a):
     # release_dir was resolved once by the stable wrapper. Never resolve current again.
     if release.parent != root / 'unified-releases': raise ValueError('Invalid resolved release directory')
     r = runtime_path(release, data, cfg)
+    if getattr(a, 'inspect', False):
+        manifest = read(release / 'release.json')
+        names = ['tools/guard.py', 'bili/Ray.BiliBiliTool.Console.dll'] if a.task == 'daily' else [
+            'tools/guard.py', 'lottery/main.js', 'lottery/lib/net/api.bili.js', 'lottery/lib/core/monitor.js']
+        checked = {name: digest(release / name) for name in names if name in manifest['files']}
+        print(json.dumps(dict(release=manifest['release_id'], git_commit=manifest['git_commit'],
+                              release_dir=str(release), files=checked)))
+        return
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
     guard = ['python3', r + '/tools/guard.py', 'run', '--root', runtime_path(root, data, cfg), '--task', a.task, '--']
     if a.task != 'daily':
@@ -525,6 +558,7 @@ def main():
             q.add_argument('--package', required=True); q.add_argument('--sha256', required=True)
     q = sub.add_parser('launch'); q.add_argument('--data', required=True)
     q.add_argument('--release-dir', required=True); q.add_argument('--task', choices=TASKS, required=True)
+    q.add_argument('--inspect', action='store_true')
     a = p.parse_args()
     if hasattr(a, 'release') and a.release: valid_id(a.release)
     globals()[a.command](a)

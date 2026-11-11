@@ -78,6 +78,16 @@ class WinnerTests(unittest.TestCase):
         saved=w.get(self.c,w.key(record));self.assertEqual(saved['notifyCount'],2);self.assertEqual(saved['status'],'dismissed')
         self.assertEqual(len(w.records(self.c)),1)
 
+    def test_reclassification_updates_stored_records_and_preserves_manual_decisions(self):
+        noise=self.row('review');noise.update(content='感谢关注，分享有趣的数码产品',ruleVersion=1,notifyCount=1,lastNotifiedAt=self.now*1000)
+        manual=self.row('winner',identifier='b'*24);manual.update(content=noise['content'],ruleVersion=1,manual='confirmed',operationAt=self.now,notifyCount=2)
+        w.merge(self.c,noise,self.now);w.merge(self.c,manual,self.now);self.c.commit()
+        w.collect(self.root,self.cfg,self.c,self.now+1)
+        saved=w.get(self.c,w.key(noise));self.assertEqual(saved['category'],'ignored');self.assertEqual(saved['notifyCount'],1)
+        self.assertEqual(saved['ruleVersion'],2)
+        confirmed=w.get(self.c,w.key(manual));self.assertEqual(confirmed['category'],'winner');self.assertEqual(confirmed['manual'],'confirmed')
+        self.assertEqual(confirmed['notifyCount'],2)
+
     def test_sync_cache_stays_visible_when_offline_and_action_fails(self):
         peer=dict(server='REMOTE');cfg=w.settings(self.root);cfg['peers']=[peer];guard.atomic(self.root/'wins/config.json',cfg)
         row=self.row();row['server']='REMOTE'
