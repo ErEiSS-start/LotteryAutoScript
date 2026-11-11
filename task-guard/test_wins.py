@@ -80,7 +80,7 @@ class WinnerTests(unittest.TestCase):
 
     def test_reclassification_updates_stored_records_and_preserves_manual_decisions(self):
         noise=self.row('review');noise.update(content='感谢关注，分享有趣的数码产品',ruleVersion=1,notifyCount=1,lastNotifiedAt=self.now*1000)
-        manual=self.row('winner',identifier='b'*24);manual.update(content=noise['content'],ruleVersion=1,manual='confirmed',operationAt=self.now,notifyCount=2)
+        manual=self.row('winner',identifier='b'*24);manual.update(content=noise['content'],messageSequence='9',ruleVersion=1,manual='confirmed',operationAt=self.now,notifyCount=2)
         w.merge(self.c,noise,self.now);w.merge(self.c,manual,self.now);self.c.commit()
         w.collect(self.root,self.cfg,self.c,self.now+1)
         saved=w.get(self.c,w.key(noise));self.assertEqual(saved['category'],'ignored');self.assertEqual(saved['notifyCount'],1)
