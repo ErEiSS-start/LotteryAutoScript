@@ -1,0 +1,59 @@
+{
+  "release": "20261111-runtime-wins-v1",
+  "source_commit": "1bbc0be5333992bbcd2714a8fbd0432051a243eb",
+  "archive_sha256": "a03078b5d4e25a53524c6a392f389b02cb032fdfef5f842338e0a67a54032333",
+  "manifest_sha256": "b7a6d7ce876bd59eb64369e42a0b7893de32c638ca350a70544705b708f166df",
+  "offline_release_suite_passed": true,
+  "regressions": [
+    "Relative release selection after mounting data at a different path",
+    "Invalid selected release fails instead of silent legacy fallback",
+    "Four normal runtime entries inspected without running business actions",
+    "Welcome, marketing, numeric-product and livestream-opening false positives",
+    "Reclassification preserves manual decisions and delivery counters"
+  ],
+  "servers": {
+    "wuhan": {
+      "actual_files_verified": 952,
+      "runtime_verified": true,
+      "configuration_unchanged": true,
+      "changed_state_files": [
+        "lottery_info/pending_wins_3747576807427377.json",
+        "lottery_info/pending_wins_5212108.json",
+        "lottery_info/pending_wins_638056948.json",
+        "lottery_info/pending_wins_6508110.json"
+      ],
+      "health_passed": true
+    },
+    "singapore": {
+      "actual_files_verified": 952,
+      "runtime_verified": true,
+      "configuration_unchanged": true,
+      "changed_state_files": [],
+      "health_passed": true
+    },
+    "usa": {
+      "actual_files_verified": 952,
+      "runtime_verified": true,
+      "configuration_unchanged": true,
+      "changed_state_files": [],
+      "health_passed": true
+    }
+  },
+  "winner_state_validation": {
+    "ids_retained": true,
+    "manual_archive_reply_and_delivery_state_preserved": true,
+    "existing_records_reclassified": true
+  },
+  "read_only_recent_notice_preview": {
+    "records": 29,
+    "ignored": 21,
+    "reservation": 6,
+    "review": 2
+  },
+  "web": {
+    "authenticated_status": 200,
+    "sync_warnings": []
+  },
+  "live_repost_verified": false,
+  "rollback_previous_release": "20261106-task-recovery-v1"
+}

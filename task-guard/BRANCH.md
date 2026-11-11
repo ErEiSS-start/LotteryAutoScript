@@ -4,7 +4,7 @@
 
 第三项统一发布、校验与回滚的当前入口为 `release_manager.py`，操作约定见 `RELEASES.md`。下面的一次性部署说明仅作历史记录；新发布不再直接运行旧部署脚本。
 
-当前统一版本为 `20261106-task-recovery-v1`。评论限额时暂停该账号本次任务，清理分组仅查找并在失效时复查一次，采集成功提交快照后独立恢复采集告警。三台验收见 `reports/task-recovery-acceptance.json`。上游接口迁移验收见 `reports/upstream-api-acceptance.json`。参与量日报和中奖页的使用说明见 `METRICS.md` 和 `WINS.md`。
+当前统一版本为 `20261111-runtime-wins-v1`。发布指针使用相对路径，校验覆盖容器内四类实际任务入口与文件哈希。无效发布入口会明确失败。中奖分类规则收紧宽泛关键词，并复核已有记录。验收见 `reports/runtime-wins-acceptance.json`。此前评论限额、清理与接口迁移验收见 `reports/task-recovery-acceptance.json` 和 `reports/upstream-api-acceptance.json`。参与量日报和中奖页说明见 `METRICS.md` 和 `WINS.md`。
 
 现已包含第二项“每日参与量统计与异常提醒”。武汉每五分钟汇总三台统计，每天纽约时间 09:00 发前一天的合并日报；运行、统计口径、受限 SSH、保守提醒及回滚说明见 `METRICS.md`。
 
